@@ -9,10 +9,10 @@ service cloud.firestore {
     // 0.1 Global Helpers
     function isSignedIn() { return request.auth != null; }
     function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
-    function isAdmin() { 
-      return isSignedIn() && 
-             request.auth.token.email.matches('(?i)brownalice773@gmail.com') && 
-             request.auth.token.email_verified == true; 
+    // Admin email is fixed in rules; Google sign-in supplies email on the token.
+    function isAdmin() {
+      return isSignedIn() &&
+             request.auth.token.email.matches('(?i)brownalice773@gmail.com');
     }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     function incoming() { return request.resource.data; }

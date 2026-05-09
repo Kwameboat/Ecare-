@@ -524,11 +524,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchDoctors(); // Global fetch for recommendations
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       try {
         setUser(u);
         if (u) {
+          fetchDoctors();
           const path = `users/${u.uid}`;
           const userDocRef = doc(db, 'users', u.uid);
           
@@ -580,6 +580,8 @@ export default function App() {
           }, (error) => {
             handleFirestoreError(error, OperationType.GET, `users/${u.uid}/sessions`);
           });
+        } else {
+          setDoctors([]);
         }
       } finally {
         setLoading(false);
@@ -636,10 +638,26 @@ export default function App() {
 
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
     try {
       await signInWithPopup(auth, provider);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Login failed:", error);
+      const err = error as { code?: string; message?: string };
+      const code = err?.code || "";
+      if (code === "auth/unauthorized-domain") {
+        alert(
+          `Firebase Auth is blocking this domain. In Firebase Console → Authentication → Settings → Authorized domains, add:\n\n${window.location.hostname}\n\nThen try again.`
+        );
+      } else if (code === "auth/popup-blocked") {
+        alert("Your browser blocked the Google sign-in popup. Allow popups for this site and try again.");
+      } else if (code === "auth/popup-closed-by-user") {
+        return;
+      } else if (code === "auth/cancelled-popup-request") {
+        return;
+      } else {
+        alert(err?.message || "Google sign-in failed. Check the browser console and try again.");
+      }
     }
   };
 
