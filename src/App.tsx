@@ -135,6 +135,11 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   };
+  // Branding doc is read on the login screen; never interrupt the user with a modal.
+  if (path === "settings/app" && operationType === OperationType.GET) {
+    console.warn("[Firestore] settings/app read failed (using defaults):", JSON.stringify(errInfo));
+    throw new Error(JSON.stringify(errInfo));
+  }
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   if (errInfo.error.toLowerCase().includes('permission')) {
     const isAdminEmail = auth.currentUser?.email?.toLowerCase() === 'brownalice773@gmail.com';
@@ -315,12 +320,11 @@ export default function App() {
         }
       }
     }, (error) => {
-      if (!auth.currentUser) {
-        console.warn("[Firestore] settings/app listener (guest):", error);
+      try {
+        handleFirestoreError(error, OperationType.GET, "settings/app");
+      } catch {
         setConnectionStatus("fail");
-        return;
       }
-      handleFirestoreError(error, OperationType.GET, "settings/app");
     });
     return () => unsub();
   }, []);
