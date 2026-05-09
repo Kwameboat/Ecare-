@@ -734,11 +734,14 @@ export default function App() {
     }
 
     try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 45_000);
       const resp = await fetch('/api/deduct-credits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.uid, type: type === 'mixed' ? 'image' : type })
-      });
+        body: JSON.stringify({ userId: user.uid, type: type === 'mixed' ? 'image' : type }),
+        signal: ctrl.signal,
+      }).finally(() => clearTimeout(tid));
       
       const text = await resp.text();
       let data;
@@ -755,9 +758,9 @@ export default function App() {
       }
 
       if (resp.status === 503 && data?.code === "MISSING_FIREBASE_ADMIN") {
-        alert(
-          data.error ||
-            "The server needs FIREBASE_SERVICE_ACCOUNT_JSON on Vercel. Trying offline credit update."
+        console.warn(
+          "[Credits] FIREBASE_SERVICE_ACCOUNT_JSON missing on server — using client-side deduction.",
+          data.error
         );
       }
       
@@ -771,9 +774,11 @@ export default function App() {
       return true;
     } catch (e: any) {
       console.error("Deduct fallback error:", e);
-      // Even if fallback fails, we try to proceed if we can at least decrement? 
-      // No, if rules block it, it will fail here.
-      alert("Error processing credits: " + e.message);
+      const msg =
+        e?.name === "AbortError"
+          ? "Credit check timed out. Check network or try again."
+          : e?.message || String(e);
+      alert("Error processing credits: " + msg);
     }
     return false;
   };
@@ -868,28 +873,29 @@ export default function App() {
     const activeType = attachments.length > 0 ? 'mixed' : type;
     if (!user || (!input.trim() && !mediaBase64 && attachments.length === 0)) return;
 
-    const canProceed = await deductCredits(activeType);
-    if (!canProceed) {
-      alert("Could not process message. Check your credit balance or try again.");
-      return;
-    }
-
-    const currentInput = input;
-    const userMsg: Message = {
-      role: 'user',
-      content: currentInput || (activeType === 'image' || activeType === 'mixed' ? "[Attachments]" : "[Voice Message]"),
-      type: activeType,
-      attachments: attachments.length > 0 ? attachments : (mediaBase64 ? [{ name: 'attachment', type: type === 'image' ? 'image/jpeg' : 'audio/wav', data: mediaBase64 }] : undefined),
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, userMsg]);
-    saveMessage(userMsg);
-    setInput("");
-    setAttachments([]);
     setIsTyping(true);
-
     try {
+      const canProceed = await deductCredits(activeType);
+      if (!canProceed) {
+        alert("Could not process message. Check your credit balance or try again.");
+        return;
+      }
+
+      const currentInput = input;
+      const userMsg: Message = {
+        role: 'user',
+        content: currentInput || (activeType === 'image' || activeType === 'mixed' ? "[Attachments]" : "[Voice Message]"),
+        type: activeType,
+        attachments: attachments.length > 0 ? attachments : (mediaBase64 ? [{ name: 'attachment', type: type === 'image' ? 'image/jpeg' : 'audio/wav', data: mediaBase64 }] : undefined),
+        timestamp: new Date()
+      };
+
+      setMessages(prev => [...prev, userMsg]);
+      saveMessage(userMsg);
+      setInput("");
+      setAttachments([]);
+
+      try {
       const history = messages.map(m => {
         let parts: any[] = [{ text: m.content }];
         if (m.attachments) {
@@ -946,15 +952,16 @@ export default function App() {
       if (type === 'voice' || (responseText && responseText.length < 300)) {
         playAudio(aiMsg.content);
       }
-    } catch (error: any) {
-      console.error("Gemini Error:", error);
-      alert("Error: " + (error.message || "Failed to get a response. Please try again."));
-      const errMsg: Message = {
-        role: 'model',
-        content: `Error: ${error.message || "Failed to get a response. Please try again."}`,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, errMsg]);
+      } catch (error: any) {
+        console.error("Gemini Error:", error);
+        alert("Error: " + (error.message || "Failed to get a response. Please try again."));
+        const errMsg: Message = {
+          role: 'model',
+          content: `Error: ${error.message || "Failed to get a response. Please try again."}`,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, errMsg]);
+      }
     } finally {
       setIsTyping(false);
     }
@@ -3062,7 +3069,12 @@ export default function App() {
           <input 
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
             placeholder={isRecording ? "Listening..." : "Describe your health concern..."}
             className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder:text-slate-500 font-medium px-2"
           />

@@ -1,16 +1,39 @@
 /** Calls server-side Gemini routes so GEMINI_API_KEY stays on the server (Vercel env), not in the JS bundle. */
 
+function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(t));
+}
+
 export async function generateHealthResponse(
   prompt: string,
   history: unknown[] = [],
   mediaParts: unknown[] = [],
   doctors: { name: string; specialty: string }[] = []
 ) {
-  const res = await fetch("/api/gemini/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, history, mediaParts, doctors }),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      "/api/gemini/chat",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, history, mediaParts, doctors }),
+      },
+      120_000
+    );
+  } catch (e: unknown) {
+    const name = e instanceof Error ? e.name : (e as { name?: string })?.name;
+    if (name === "AbortError") {
+      throw new Error("Chat timed out. Check your connection and try again.");
+    }
+    throw e;
+  }
 
   const data = (await res.json().catch(() => ({}))) as {
     text?: string;
