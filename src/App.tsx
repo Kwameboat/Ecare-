@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "motion/react";
-import { Send, Image as ImageIcon, Mic, LogOut, HeartPulse, CreditCard, StopCircle, Volume2, ShieldCheck, Search, Plus, Minus, X, Download, Bell, Clock, Zap, ArrowUpRight, ArrowDownLeft, History } from "lucide-react";
+import { Send, Image as ImageIcon, Mic, LogOut, HeartPulse, CreditCard, StopCircle, Volume2, ShieldCheck, Search, Plus, Minus, X, Download, Bell, Clock, Zap, ArrowUpRight, ArrowDownLeft, History, PanelLeft } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { auth, db } from "./lib/firebase";
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut, User } from "firebase/auth";
@@ -270,6 +270,7 @@ export default function App() {
   const [newCredits, setNewCredits] = useState(24);
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'testing' | 'ok' | 'fail'>('testing');
@@ -500,6 +501,10 @@ export default function App() {
       console.error(e);
     }
   };
+
+  useEffect(() => {
+    if (showAdmin) setSidebarCollapsed(true);
+  }, [showAdmin]);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: any) => {
@@ -1263,9 +1268,14 @@ export default function App() {
       <div className="absolute top-[-5%] left-[-20%] w-[80%] h-[40%] bg-blue-600/10 rounded-full blur-[100px] pointer-events-none"></div>
       <div className="absolute bottom-[-5%] right-[-20%] w-[80%] h-[40%] bg-indigo-600/10 rounded-full blur-[100px] pointer-events-none"></div>
 
-      {/* Desktop Sidebar (History) */}
-      <aside className="hidden lg:flex flex-col w-[320px] border-r border-white/5 bg-[#0d0d0f] z-20 relative">
-        <div className="p-8 border-b border-white/5 flex items-center gap-4">
+      {/* Desktop Sidebar — z-10 so main column + admin overlay stack above for full-screen modals */}
+      <aside
+        className={cn(
+          "hidden lg:flex flex-col shrink-0 border-r border-white/5 bg-[#0d0d0f] z-10 relative transition-[width,min-width] duration-300 ease-out overflow-hidden",
+          sidebarCollapsed ? "w-0 min-w-0 max-w-0 border-transparent opacity-0 pointer-events-none" : "w-[320px] opacity-100"
+        )}
+      >
+        <div className="w-[320px] shrink-0 p-8 border-b border-white/5 flex items-center gap-4">
           <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 ring-1 ring-white/10 overflow-hidden p-1">
             {settings.logoUrl ? (
               <img src={settings.logoUrl} alt="Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
@@ -1359,16 +1369,24 @@ export default function App() {
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col relative z-10 w-full max-w-full lg:max-w-none">
+      <div className="relative z-30 flex min-w-0 flex-1 flex-col w-full max-w-full lg:max-w-none">
         {/* 360 Experience Polish: Decorative Background Elements */}
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/5 rounded-full blur-[120px] animate-pulse pointer-events-none"></div>
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/5 rounded-full blur-[120px] animate-pulse pointer-events-none" style={{ animationDelay: '1s' }}></div>
         
-        <header className="glass-dark p-4 lg:p-6 flex items-center justify-between z-20 border-b border-white/5">
-          <div className="flex items-center gap-4">
+        <header className="glass-dark sticky top-0 z-40 flex shrink-0 items-center justify-between gap-2 border-b border-white/5 px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-3 sm:px-4 lg:px-6 lg:py-4">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed((c) => !c)}
+              className="hidden lg:flex p-2.5 sm:p-3 bg-white/10 rounded-2xl text-slate-300 hover:bg-white/15 hover:text-white transition-colors ring-1 ring-white/10 shrink-0"
+              aria-label={sidebarCollapsed ? "Expand consultation sidebar" : "Collapse consultation sidebar"}
+            >
+              <PanelLeft className={cn("w-5 h-5 transition-transform", sidebarCollapsed && "text-blue-400")} />
+            </button>
             <button 
               onClick={() => setShowHistory(true)}
-              className="lg:hidden p-3 bg-white/5 rounded-2xl text-slate-400 hover:text-white transition-colors"
+              className="lg:hidden p-2.5 sm:p-3 bg-white/5 rounded-2xl text-slate-400 hover:text-white transition-colors shrink-0"
             >
               <Clock className="w-5 h-5" />
             </button>
@@ -1388,18 +1406,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {deferredPrompt && (
-              <button 
-                onClick={installPWA}
-                className="hidden md:flex p-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-2xl hover:bg-emerald-500/20 transition-all items-center gap-2 px-4 group shadow-xl shadow-emerald-500/5"
-              >
-                <div className="w-6 h-6 bg-emerald-500 rounded-lg flex items-center justify-center text-white group-hover:animate-bounce">
-                  <Download className="w-3 h-3" />
-                </div>
-                <span className="text-[10px] font-black uppercase tracking-widest">Install Protocol</span>
-              </button>
-            )}
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
             {isAdminUser && (
               <button 
                 onClick={() => setShowAdmin(!showAdmin)}
@@ -1802,7 +1809,7 @@ export default function App() {
             initial={{ opacity: 0, y: 100 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 100 }}
-            className="fixed inset-0 z-50 bg-[#020203] flex flex-col p-6 overflow-hidden"
+            className="fixed inset-0 z-[200] bg-[#020203] flex flex-col p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] sm:p-6 overflow-hidden"
           >
             <div className="flex justify-between items-center mb-8 shrink-0">
               <div className="flex items-center gap-4">
@@ -2634,32 +2641,6 @@ export default function App() {
                 </div>
               )}
             </div>
-
-            <div className="shrink-0 pt-8 mt-12 border-t border-white/5 text-center px-8">
-              <div className="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-[32px] mb-8 relative overflow-hidden group">
-                <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl -mr-12 -mt-12 group-hover:scale-150 transition-transform"></div>
-                <div className="w-14 h-14 bg-emerald-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-emerald-500/20 group-hover:rotate-12 transition-transform">
-                  <Download className="w-7 h-7 text-white" />
-                </div>
-                <h4 className="text-sm font-black text-white uppercase italic mb-1">eCare Anywhere</h4>
-                <p className="text-[10px] text-slate-500 font-bold uppercase mb-6 leading-relaxed">Install to your home screen for rapid response medical AI</p>
-                <button 
-                  onClick={installPWA}
-                  className="w-full h-12 bg-white text-black rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all active:scale-95"
-                >
-                  Enable Offline Access
-                </button>
-              </div>
-              
-              <p className="text-[10px] text-slate-600 font-black uppercase tracking-[0.4em] italic mb-2">
-                Unified Medical Intelligence Protocol
-              </p>
-              <div className="flex justify-center gap-2 pb-8">
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-500/30"></div>
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-500/30"></div>
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-500/30"></div>
-              </div>
-            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -2684,7 +2665,7 @@ export default function App() {
                   <h4 className="text-2xl font-black text-white italic tracking-tight uppercase">Install eCare GH</h4>
                   <div className="px-3 py-1 bg-white/20 rounded-full text-[8px] font-black uppercase tracking-widest text-white border border-white/30 backdrop-blur-md">Recommended</div>
                 </div>
-                <p className="text-sm lg:text-base text-blue-100 font-medium max-w-sm">Access 24/7 medical AI diagnostics with offline synchronization and superior mobile performance.</p>
+                <p className="text-sm lg:text-base text-blue-100 font-medium max-w-sm">Add eCare to your home screen for faster launch and a smoother experience on your phone.</p>
               </div>
 
               <div className="relative z-10 flex flex-col items-center gap-3 w-full md:w-auto">
