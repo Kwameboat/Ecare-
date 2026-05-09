@@ -5,12 +5,15 @@ import cors from "cors";
 import { FieldValue } from "firebase-admin/firestore";
 import { db } from "./firebase-init";
 import { runAppointmentReminders } from "./reminders";
+import { attachGeminiRoutes } from "./gemini-routes";
 
 export async function createHttpApp(): Promise<Express> {
   const app = express();
 
   app.use(cors());
   app.use(express.json({ limit: "50mb" }));
+
+  attachGeminiRoutes(app);
 
   app.get("/manifest.json", async (req, res) => {
     try {

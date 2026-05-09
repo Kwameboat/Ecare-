@@ -1,10 +1,10 @@
 import { motion, AnimatePresence } from "motion/react";
-import { Send, Image as ImageIcon, Mic, LogOut, HeartPulse, CreditCard, StopCircle, Volume2, ShieldCheck, Search, Plus, Minus, X, Download, Bell, Clock, Zap, ArrowUpRight, ArrowDownLeft, History, PanelLeft } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { Send, Image as ImageIcon, Mic, LogOut, HeartPulse, CreditCard, StopCircle, Volume2, ShieldCheck, Search, Plus, Minus, X, Download, Bell, Clock, Zap, ArrowUpRight, ArrowDownLeft, History, PanelLeft, Sparkles } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { auth, db } from "./lib/firebase";
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut, User } from "firebase/auth";
 import { doc, getDoc, setDoc, onSnapshot, updateDoc, serverTimestamp, arrayUnion, collection, query, where, getDocs, addDoc, orderBy, increment, getDocFromServer, deleteDoc } from "firebase/firestore";
-import { generateHealthResponse, generateSpeech } from "./lib/gemini";
+import { generateHealthResponse, generateSpeech, fetchGeminiStatus } from "./lib/gemini";
 import ReactMarkdown from "react-markdown";
 import { cn } from "./lib/utils";
 
@@ -274,6 +274,25 @@ export default function App() {
 
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'testing' | 'ok' | 'fail'>('testing');
+  const [geminiAdminStatus, setGeminiAdminStatus] = useState<
+    "idle" | "loading" | "ok" | "missing" | "error"
+  >("idle");
+
+  const refreshGeminiAdminStatus = useCallback(async () => {
+    try {
+      setGeminiAdminStatus("loading");
+      const s = await fetchGeminiStatus();
+      setGeminiAdminStatus(s.configured ? "ok" : "missing");
+    } catch {
+      setGeminiAdminStatus("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showAdmin && adminTab === "settings") {
+      void refreshGeminiAdminStatus();
+    }
+  }, [showAdmin, adminTab, refreshGeminiAdminStatus]);
 
   useEffect(() => {
     // Connection health check
@@ -2131,6 +2150,81 @@ export default function App() {
                           className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm outline-none focus:border-blue-500/50 transition-colors text-white"
                         />
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Google Gemini — server-side API (key in Vercel / .env.local, not in browser) */}
+                  <div className="glass p-8 rounded-[32px] border-blue-500/15 space-y-6 bg-blue-500/[0.03]">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div className="flex items-center gap-4 min-w-0">
+                        <div className="w-12 h-12 bg-blue-500/15 rounded-2xl flex items-center justify-center shrink-0">
+                          <Sparkles className="w-6 h-6 text-blue-400" />
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="font-bold text-lg text-white">Google Gemini API</h4>
+                          <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                            Chat and voice use your server so the API key stays private. Add{" "}
+                            <code className="text-emerald-400/90">GEMINI_API_KEY</code> to Vercel environment variables.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        {geminiAdminStatus === "loading" && (
+                          <span className="text-[10px] font-black uppercase text-slate-500">Checking…</span>
+                        )}
+                        {geminiAdminStatus === "ok" && (
+                          <span className="px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-black uppercase border border-emerald-500/25">
+                            Connected
+                          </span>
+                        )}
+                        {geminiAdminStatus === "missing" && (
+                          <span className="px-3 py-1.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-black uppercase border border-amber-500/25">
+                            Key missing on server
+                          </span>
+                        )}
+                        {geminiAdminStatus === "idle" && (
+                          <span className="text-[10px] font-black uppercase text-slate-600">—</span>
+                        )}
+                        {geminiAdminStatus === "error" && (
+                          <span className="px-3 py-1.5 rounded-full bg-red-500/15 text-red-400 text-[10px] font-black uppercase border border-red-500/25">
+                            Status check failed
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void refreshGeminiAdminStatus()}
+                          className="px-4 py-2 rounded-xl bg-white/10 text-[10px] font-black uppercase tracking-wider hover:bg-white/15 transition-colors border border-white/10"
+                        >
+                          Refresh
+                        </button>
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-black/30 border border-white/10 p-5 space-y-3 text-xs text-slate-400 leading-relaxed">
+                      <p className="font-bold text-slate-300 text-sm">Setup</p>
+                      <ol className="list-decimal pl-5 space-y-2 marker:text-blue-500">
+                        <li>
+                          Create a key in{" "}
+                          <a
+                            href="https://aistudio.google.com/apikey"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-400 underline font-semibold hover:text-blue-300"
+                          >
+                            Google AI Studio
+                          </a>
+                          .
+                        </li>
+                        <li>
+                          Vercel → Project → Settings → Environment Variables → add{" "}
+                          <code className="text-emerald-400">GEMINI_API_KEY</code> for Production (and Preview if you use preview deploys).
+                        </li>
+                        <li>Redeploy, then tap Refresh above.</li>
+                      </ol>
+                      <p className="text-[10px] text-slate-500 border-t border-white/5 mt-3 pt-3">
+                        Local: add <code className="text-slate-300">GEMINI_API_KEY</code> to{" "}
+                        <code className="text-slate-300">.env.local</code> and run{" "}
+                        <code className="text-slate-300">npm run dev</code>.
+                      </p>
                     </div>
                   </div>
 

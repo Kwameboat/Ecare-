@@ -1,3 +1,4 @@
+import "dotenv/config";
 import serverless from "serverless-http";
 import { createHttpApp } from "../server/app";
 
