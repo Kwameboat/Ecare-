@@ -1,0 +1,6 @@
+{
+  "name": "eCare GH AI",
+  "description": "eCare GH AI is an AI-powered PWA health assistant for the African market, supporting multilingual voice and vision analysis with a credits-based Paystack payment system.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": []
+}
