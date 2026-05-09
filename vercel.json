@@ -3,11 +3,6 @@
   "buildCommand": "npm run build",
   "framework": null,
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
-  "functions": {
-    "api/index.js": {
-      "includeFiles": "{dist/**,public/**,firebase-applet-config.json}"
-    }
-  },
   "crons": [
     {
       "path": "/api/cron/reminders",
