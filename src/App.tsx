@@ -141,7 +141,9 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     if (isAdminEmail) {
       alert(`Admin Error: Permission Denied for ${operationType} on ${path}. Check Firestore rules and that your Google account email is verified.`);
     } else if (!auth.currentUser) {
-      alert(`Please sign in to use this feature. (${operationType} on ${path})`);
+      console.warn(
+        `[Firestore] Permission denied while signed out (${operationType} on ${path}). Sign in for full access. Deploy Firestore rules that allow read on settings/app for guests if branding should load before login.`
+      );
     } else {
       alert(`Permission denied for ${operationType} on ${path}. Contact support if this persists.`);
     }
@@ -313,6 +315,11 @@ export default function App() {
         }
       }
     }, (error) => {
+      if (!auth.currentUser) {
+        console.warn("[Firestore] settings/app listener (guest):", error);
+        setConnectionStatus("fail");
+        return;
+      }
       handleFirestoreError(error, OperationType.GET, "settings/app");
     });
     return () => unsub();
