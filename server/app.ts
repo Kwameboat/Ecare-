@@ -2,7 +2,7 @@ import express, { type Express } from "express";
 import path from "path";
 import cors from "cors";
 import { FieldValue } from "firebase-admin/firestore";
-import { db } from "./firebase-init.js";
+import { db, hasFirebaseAdminCredentials } from "./firebase-init.js";
 import { runAppointmentReminders } from "./reminders.js";
 import { attachGeminiRoutes } from "./gemini-routes.js";
 
@@ -16,6 +16,10 @@ export async function createHttpApp(): Promise<Express> {
 
   app.get("/manifest.json", async (req, res) => {
     try {
+      if (process.env.VERCEL === "1" && !hasFirebaseAdminCredentials()) {
+        res.sendFile(path.resolve("public/manifest.json"));
+        return;
+      }
       const settingsSnap = await db.collection("settings").doc("app").get();
       const settings = settingsSnap.exists ? settingsSnap.data() : {};
       const logoUrl =
@@ -56,6 +60,15 @@ export async function createHttpApp(): Promise<Express> {
     const { userId, type } = req.body as { userId?: string; type?: string };
     if (!userId)
       return res.status(400).json({ success: false, error: "userId is required" });
+
+    if (process.env.VERCEL === "1" && !hasFirebaseAdminCredentials()) {
+      return res.status(503).json({
+        success: false,
+        code: "MISSING_FIREBASE_ADMIN",
+        error:
+          "Server missing FIREBASE_SERVICE_ACCOUNT_JSON. In Firebase Console → Project settings → Service accounts → Generate new private key, then add the full JSON as one line in Vercel → Environment Variables and redeploy.",
+      });
+    }
 
     const settingsSnap = await db.collection("settings").doc("app").get();
     const settings = settingsSnap.exists ? settingsSnap.data() : {};
@@ -99,6 +112,15 @@ export async function createHttpApp(): Promise<Express> {
       const { reference } = req.body as { reference?: string };
       if (!reference?.trim()) {
         return res.status(400).json({ success: false, error: "reference required" });
+      }
+
+      if (process.env.VERCEL === "1" && !hasFirebaseAdminCredentials()) {
+        return res.status(503).json({
+          success: false,
+          code: "MISSING_FIREBASE_ADMIN",
+          error:
+            "Add FIREBASE_SERVICE_ACCOUNT_JSON on Vercel for Paystack verification (Firebase Console → Service accounts → Generate key).",
+        });
       }
 
       const secretSnap = await db.collection("settings").doc("paystack").get();
@@ -164,6 +186,13 @@ export async function createHttpApp(): Promise<Express> {
   });
 
   app.get("/api/cron/reminders", async (_req, res) => {
+    if (process.env.VERCEL === "1" && !hasFirebaseAdminCredentials()) {
+      return res.status(503).json({
+        ok: false,
+        code: "MISSING_FIREBASE_ADMIN",
+        error: "Set FIREBASE_SERVICE_ACCOUNT_JSON on Vercel for cron / Firestore.",
+      });
+    }
     try {
       await runAppointmentReminders(db);
       res.json({ ok: true });

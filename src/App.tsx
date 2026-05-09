@@ -753,6 +753,13 @@ export default function App() {
       if (resp.ok && data?.success) {
         return true;
       }
+
+      if (resp.status === 503 && data?.code === "MISSING_FIREBASE_ADMIN") {
+        alert(
+          data.error ||
+            "The server needs FIREBASE_SERVICE_ACCOUNT_JSON on Vercel. Trying offline credit update."
+        );
+      }
       
       // Fallback to client-side deduction if server fails or returns error
       console.warn("Server deduction failed, attempting client-side fallback...");

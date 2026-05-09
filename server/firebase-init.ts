@@ -12,6 +12,11 @@ export const userDatabaseId = firebaseConfig.firestoreDatabaseId as string | und
 process.env.GOOGLE_CLOUD_PROJECT = userProjectId;
 process.env.FIRESTORE_PROJECT_ID = userProjectId;
 
+/** Admin SDK needs a service account JSON on Vercel (no GCP metadata server). */
+export function hasFirebaseAdminCredentials(): boolean {
+  return Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim());
+}
+
 let appInstance: App;
 
 if (getApps().length === 0) {
@@ -41,6 +46,12 @@ export const db =
 
 async function testConnection() {
   try {
+    if (process.env.VERCEL === "1" && !hasFirebaseAdminCredentials()) {
+      console.warn(
+        "[Firestore] Skipping startup test: set FIREBASE_SERVICE_ACCOUNT_JSON on Vercel (Firestore admin calls will fail without it)."
+      );
+      return;
+    }
     const dbId = userDatabaseId || "(default)";
     console.log(`[Firestore] Connection Test: Project=${userProjectId}, Database=${dbId}`);
     console.log("[Firestore] Attempting to read settings/app...");

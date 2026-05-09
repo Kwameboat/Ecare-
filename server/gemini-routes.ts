@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { GoogleGenAI, Modality } from "@google/genai";
-import { db } from "./firebase-init.js";
+import { db, hasFirebaseAdminCredentials } from "./firebase-init.js";
 import { getGeminiApiKey } from "./gemini-key.js";
 
 /** Defaults use widely available AI Studio models; override via Vercel env if needed. */
@@ -74,10 +74,14 @@ export function attachGeminiRoutes(app: Express) {
     try {
       const fromEnv = Boolean(process.env.GEMINI_API_KEY?.trim());
       let fromFirestore = false;
-      if (!fromEnv) {
-        const snap = await db.collection("settings").doc("gemini").get();
-        const k = snap.data()?.apiKey;
-        fromFirestore = typeof k === "string" && k.trim().length > 0;
+      if (!fromEnv && hasFirebaseAdminCredentials()) {
+        try {
+          const snap = await db.collection("settings").doc("gemini").get();
+          const k = snap.data()?.apiKey;
+          fromFirestore = typeof k === "string" && k.trim().length > 0;
+        } catch {
+          fromFirestore = false;
+        }
       }
       const configured = fromEnv || fromFirestore;
       const source = fromEnv ? "environment" : fromFirestore ? "firestore" : "none";

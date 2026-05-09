@@ -19,6 +19,9 @@ var userProjectId = firebaseConfig.projectId;
 var userDatabaseId = firebaseConfig.firestoreDatabaseId;
 process.env.GOOGLE_CLOUD_PROJECT = userProjectId;
 process.env.FIRESTORE_PROJECT_ID = userProjectId;
+function hasFirebaseAdminCredentials() {
+  return Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim());
+}
 var appInstance;
 if (getApps().length === 0) {
   const saJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
@@ -41,6 +44,12 @@ console.log(`[Admin] Effective Project ID: ${appInstance.options.projectId || "U
 var db = userDatabaseId !== void 0 && userDatabaseId !== "" ? getFirestore(appInstance, userDatabaseId) : getFirestore(appInstance);
 async function testConnection() {
   try {
+    if (process.env.VERCEL === "1" && !hasFirebaseAdminCredentials()) {
+      console.warn(
+        "[Firestore] Skipping startup test: set FIREBASE_SERVICE_ACCOUNT_JSON on Vercel (Firestore admin calls will fail without it)."
+      );
+      return;
+    }
     const dbId = userDatabaseId || "(default)";
     console.log(`[Firestore] Connection Test: Project=${userProjectId}, Database=${dbId}`);
     console.log("[Firestore] Attempting to read settings/app...");
@@ -105,6 +114,9 @@ import { GoogleGenAI, Modality } from "@google/genai";
 async function getGeminiApiKey() {
   const fromEnv = process.env.GEMINI_API_KEY?.trim();
   if (fromEnv) return fromEnv;
+  if (!hasFirebaseAdminCredentials()) {
+    return null;
+  }
   try {
     const snap = await db.collection("settings").doc("gemini").get();
     const k = snap.data()?.apiKey;
@@ -179,10 +191,14 @@ function attachGeminiRoutes(app) {
     try {
       const fromEnv = Boolean(process.env.GEMINI_API_KEY?.trim());
       let fromFirestore = false;
-      if (!fromEnv) {
-        const snap = await db.collection("settings").doc("gemini").get();
-        const k = snap.data()?.apiKey;
-        fromFirestore = typeof k === "string" && k.trim().length > 0;
+      if (!fromEnv && hasFirebaseAdminCredentials()) {
+        try {
+          const snap = await db.collection("settings").doc("gemini").get();
+          const k = snap.data()?.apiKey;
+          fromFirestore = typeof k === "string" && k.trim().length > 0;
+        } catch {
+          fromFirestore = false;
+        }
       }
       const configured = fromEnv || fromFirestore;
       const source = fromEnv ? "environment" : fromFirestore ? "firestore" : "none";
@@ -262,6 +278,10 @@ async function createHttpApp() {
   attachGeminiRoutes(app);
   app.get("/manifest.json", async (req, res) => {
     try {
+      if (process.env.VERCEL === "1" && !hasFirebaseAdminCredentials()) {
+        res.sendFile(path2.resolve("public/manifest.json"));
+        return;
+      }
       const settingsSnap = await db.collection("settings").doc("app").get();
       const settings = settingsSnap.exists ? settingsSnap.data() : {};
       const logoUrl = settings?.logoUrl || "https://cdn-icons-png.flaticon.com/512/2869/2869382.png";
@@ -297,6 +317,13 @@ async function createHttpApp() {
     const { userId, type } = req.body;
     if (!userId)
       return res.status(400).json({ success: false, error: "userId is required" });
+    if (process.env.VERCEL === "1" && !hasFirebaseAdminCredentials()) {
+      return res.status(503).json({
+        success: false,
+        code: "MISSING_FIREBASE_ADMIN",
+        error: "Server missing FIREBASE_SERVICE_ACCOUNT_JSON. In Firebase Console \u2192 Project settings \u2192 Service accounts \u2192 Generate new private key, then add the full JSON as one line in Vercel \u2192 Environment Variables and redeploy."
+      });
+    }
     const settingsSnap = await db.collection("settings").doc("app").get();
     const settings = settingsSnap.exists ? settingsSnap.data() : {};
     const costs = settings?.creditCosts || {
@@ -333,6 +360,13 @@ async function createHttpApp() {
       const { reference } = req.body;
       if (!reference?.trim()) {
         return res.status(400).json({ success: false, error: "reference required" });
+      }
+      if (process.env.VERCEL === "1" && !hasFirebaseAdminCredentials()) {
+        return res.status(503).json({
+          success: false,
+          code: "MISSING_FIREBASE_ADMIN",
+          error: "Add FIREBASE_SERVICE_ACCOUNT_JSON on Vercel for Paystack verification (Firebase Console \u2192 Service accounts \u2192 Generate key)."
+        });
       }
       const secretSnap = await db.collection("settings").doc("paystack").get();
       const secretKey = secretSnap.data()?.secretKey;
@@ -384,6 +418,13 @@ async function createHttpApp() {
     }
   });
   app.get("/api/cron/reminders", async (_req, res) => {
+    if (process.env.VERCEL === "1" && !hasFirebaseAdminCredentials()) {
+      return res.status(503).json({
+        ok: false,
+        code: "MISSING_FIREBASE_ADMIN",
+        error: "Set FIREBASE_SERVICE_ACCOUNT_JSON on Vercel for cron / Firestore."
+      });
+    }
     try {
       await runAppointmentReminders(db);
       res.json({ ok: true });

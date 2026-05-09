@@ -1,4 +1,4 @@
-import { db } from "./firebase-init.js";
+import { db, hasFirebaseAdminCredentials } from "./firebase-init.js";
 
 /**
  * API key resolution: Vercel/host `GEMINI_API_KEY` wins; else `settings/gemini` in Firestore (admin-written only).
@@ -6,6 +6,10 @@ import { db } from "./firebase-init.js";
 export async function getGeminiApiKey(): Promise<string | null> {
   const fromEnv = process.env.GEMINI_API_KEY?.trim();
   if (fromEnv) return fromEnv;
+
+  if (!hasFirebaseAdminCredentials()) {
+    return null;
+  }
 
   try {
     const snap = await db.collection("settings").doc("gemini").get();
