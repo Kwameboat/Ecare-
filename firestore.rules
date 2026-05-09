@@ -143,9 +143,9 @@ service cloud.firestore {
       allow create, delete: if isAdmin();
     }
 
-    // 5. Admin Settings (app doc holds public branding + Paystack public key; paystack secrets stay auth-only)
+    // 5. Admin Settings (app: public read; gemini: server/Admin SDK only — never expose API key to clients)
     match /settings/{settingId} {
-      allow read: if settingId == 'app' || isSignedIn();
+      allow read: if settingId == 'app' || (isSignedIn() && settingId != 'gemini');
       allow write: if isAdmin();
     }
   }

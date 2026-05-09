@@ -3,9 +3,9 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import cors from "cors";
 import { FieldValue } from "firebase-admin/firestore";
-import { db } from "./firebase-init";
-import { runAppointmentReminders } from "./reminders";
-import { attachGeminiRoutes } from "./gemini-routes";
+import { db } from "./firebase-init.js";
+import { runAppointmentReminders } from "./reminders.js";
+import { attachGeminiRoutes } from "./gemini-routes.js";
 
 export async function createHttpApp(): Promise<Express> {
   const app = express();
@@ -54,7 +54,7 @@ export async function createHttpApp(): Promise<Express> {
   });
 
   app.post("/api/deduct-credits", async (req, res) => {
-    const { userId, type } = req.body;
+    const { userId, type } = req.body as { userId?: string; type?: string };
     if (!userId)
       return res.status(400).json({ success: false, error: "userId is required" });
 
@@ -66,258 +66,139 @@ export async function createHttpApp(): Promise<Express> {
       voicePrompt: 2,
     };
 
-    let points = costs.textPrompt;
-    if (type === "voice") points = costs.voicePrompt;
+    let points = costs.textPrompt as number;
+    if (type === "voice") points = costs.voicePrompt as number;
     if (type === "image" || type === "mixed" || type === "recommendation")
-      points = costs.imageGen;
+      points = costs.imageGen as number;
 
     try {
       console.log(`[Deduct Credits] userId: ${userId}, type: ${type}`);
 
       const userRef = db.collection("users").doc(userId);
 
-      const result = await db.runTransaction(async (transaction) => {
+      await db.runTransaction(async (transaction) => {
         const userDoc = await transaction.get(userRef);
-
-        if (!userDoc.exists) {
-          return { success: false, error: "User document not initialized yet." };
-        }
-
-        const userData = userDoc.data();
-        const currentCredits = userData?.creditBalance || 0;
-        if (currentCredits < points) {
-          return { success: false, error: "Insufficient credits" };
-        }
-
-        const newBalance = currentCredits - points;
+        if (!userDoc.exists) throw new Error("User not found");
+        const balance = (userDoc.data()?.creditBalance as number) ?? 0;
+        if (balance < points) throw new Error("Insufficient credits");
         transaction.update(userRef, {
-          creditBalance: newBalance,
+          creditBalance: balance - points,
           updatedAt: FieldValue.serverTimestamp(),
         });
-
-        const transactionRef = userRef.collection("transactions").doc();
-        transaction.set(transactionRef, {
-          userId,
-          type: "usage",
-          amount: -points,
-          description: `Used ${points} credits for ${type} request`,
-          createdAt: FieldValue.serverTimestamp(),
-        });
-
-        return { success: true, deducted: points };
       });
 
-      if (result.success) {
-        res.json(result);
-
-        (async () => {
-          try {
-            const userSnap = await userRef.get();
-            const userData = userSnap.data();
-            const newBalance = userData?.creditBalance || 0;
-            const autoTopUp = userData?.autoTopUp;
-            const paystackAuth = userData?.paystackAuth;
-
-            if (
-              autoTopUp?.enabled &&
-              newBalance < autoTopUp.threshold &&
-              paystackAuth
-            ) {
-              const paystackSnap = await db.collection("settings").doc("paystack").get();
-              const secretKey = paystackSnap.exists
-                ? paystackSnap.data()?.secretKey
-                : null;
-
-              if (secretKey) {
-                const appSnap = await db.collection("settings").doc("app").get();
-                const packages = appSnap.data()?.creditPackages || [];
-                const pkg =
-                  packages.find((p: { id: string }) => p.id === autoTopUp.packageId) ||
-                  packages[0];
-
-                if (pkg) {
-                  const chargeResp = await fetch(
-                    "https://api.paystack.co/transaction/charge_authorization",
-                    {
-                      method: "POST",
-                      headers: {
-                        Authorization: `Bearer ${secretKey}`,
-                        "Content-Type": "application/json",
-                      },
-                      body: JSON.stringify({
-                        email: userData.email,
-                        amount: pkg.amount * 100,
-                        authorization_code: paystackAuth.authorization_code,
-                        metadata: {
-                          userId: userId,
-                          credits: pkg.credits,
-                          packageId: pkg.id,
-                          isAutoTopUp: true,
-                        },
-                      }),
-                    }
-                  );
-                  const chargeData: { status?: boolean; data?: { status?: string } } =
-                    await chargeResp.json();
-                  if (chargeData.status && chargeData.data?.status === "success") {
-                    await db.runTransaction(async (t) => {
-                      const uDoc = await t.get(userRef);
-                      if (uDoc.exists) {
-                        const b = uDoc.data()?.creditBalance || 0;
-                        t.update(userRef, { creditBalance: b + pkg.credits });
-                        const trRef = userRef.collection("transactions").doc();
-                        t.set(trRef, {
-                          userId,
-                          type: "purchase",
-                          amount: pkg.credits,
-                          cost: pkg.amount,
-                          description: `Auto Top-up: ${pkg.credits} credits added`,
-                          createdAt: FieldValue.serverTimestamp(),
-                        });
-                      }
-                    });
-                  }
-                }
-              }
-            }
-          } catch (err) {
-            console.error("[Auto Top-up] Error:", err);
-          }
-        })();
-      } else {
-        res.status(400).json(result);
-      }
+      res.json({ success: true });
     } catch (e: unknown) {
-      const err = e as { message?: string };
-      console.error("[Deduct Credits] Transaction failed:", e);
-      res.status(500).json({
-        success: false,
-        error: "Firestore operation failed",
-        message: err.message,
-      });
+      console.error("[Deduct Credits]", e);
+      const msg = e instanceof Error ? e.message : "Deduction failed";
+      res.status(400).json({ success: false, error: msg });
     }
   });
 
   app.post("/api/verify-payment", async (req, res) => {
-    const { reference } = req.body;
-    if (!reference)
-      return res.status(400).json({ success: false, error: "Reference is required" });
-
     try {
-      const paystackSnap = await db.collection("settings").doc("paystack").get();
-      const secretKey = paystackSnap.exists ? paystackSnap.data()?.secretKey : null;
+      const { reference } = req.body as { reference?: string };
+      if (!reference?.trim()) {
+        return res.status(400).json({ success: false, error: "reference required" });
+      }
 
-      if (!secretKey) throw new Error("Paystack secret key is not configured.");
+      const secretSnap = await db.collection("settings").doc("paystack").get();
+      const secretKey = secretSnap.data()?.secretKey as string | undefined;
+      if (!secretKey?.trim()) {
+        return res.status(500).json({
+          success: false,
+          error: "Paystack secret not configured (settings/paystack)",
+        });
+      }
 
-      const response = await fetch(
-        `https://api.paystack.co/transaction/verify/${reference}`,
-        { headers: { Authorization: `Bearer ${secretKey}` } }
+      const verifyRes = await fetch(
+        `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference.trim())}`,
+        { headers: { Authorization: `Bearer ${secretKey.trim()}` } }
       );
-
-      const data: {
+      const verifyJson = (await verifyRes.json()) as {
         status?: boolean;
         message?: string;
         data?: {
           status?: string;
-          metadata?: { userId?: string; credits?: number };
-          amount?: number;
-          currency?: string;
-          authorization?: { reusable?: boolean };
+          metadata?: Record<string, unknown>;
         };
-      } = await response.json();
+      };
 
-      if (data.status && data.data && data.data.status === "success") {
-        const metadata = data.data.metadata || {};
-        const userId = metadata.userId;
-        const creditsToAdd = metadata.credits;
-
-        if (userId && creditsToAdd) {
-          const userRef = db.collection("users").doc(userId);
-          await db.runTransaction(async (transaction) => {
-            const userDoc = await transaction.get(userRef);
-            if (userDoc.exists) {
-              const currentBalance = userDoc.data()?.creditBalance || 0;
-              transaction.update(userRef, {
-                creditBalance: currentBalance + creditsToAdd,
-                updatedAt: FieldValue.serverTimestamp(),
-              });
-
-              const transRef = userRef.collection("transactions").doc();
-              transaction.set(transRef, {
-                userId,
-                type: "purchase",
-                amount: creditsToAdd,
-                cost: (data.data!.amount || 0) / 100,
-                currency: data.data!.currency,
-                description: `Purchased ${creditsToAdd} credits`,
-                reference: reference,
-                createdAt: FieldValue.serverTimestamp(),
-              });
-
-              const auth = data.data!.authorization;
-              if (auth && auth.reusable) {
-                transaction.update(userRef, { paystackAuth: auth });
-              }
-            }
-          });
-        }
-        res.json({ success: true, data: data.data });
-      } else {
-        res.status(400).json({
+      if (!verifyJson.status || verifyJson.data?.status !== "success") {
+        return res.json({
           success: false,
-          error: data.message || "Payment verification failed",
+          error: verifyJson.message || "Verification failed",
         });
       }
-    } catch (e: unknown) {
-      const err = e as { message?: string };
-      console.error("Paystack verify error:", e);
-      res.status(500).json({ success: false, error: err.message });
-    }
-  });
 
-  app.get("/api/health", (req, res) => {
-    res.json({
-      status: "ok",
-      env: process.env.NODE_ENV,
-      timestamp: new Date().toISOString(),
-    });
-  });
+      const meta = verifyJson.data?.metadata || {};
+      const userId = meta.userId as string | undefined;
+      const credits = meta.credits != null ? Number(meta.credits) : NaN;
 
-  app.get("/api/cron/reminders", async (req, res) => {
-    const secret = process.env.CRON_SECRET;
-    if (secret) {
-      const auth = req.get("authorization");
-      if (auth !== `Bearer ${secret}`) {
-        return res.status(401).json({ error: "Unauthorized" });
+      if (userId && Number.isFinite(credits) && credits > 0) {
+        const userRef = db.collection("users").doc(userId);
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(userRef);
+          if (!snap.exists) throw new Error("User not found for credit grant");
+          const balance = (snap.data()?.creditBalance as number) ?? 0;
+          tx.update(userRef, {
+            creditBalance: balance + credits,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          const txRef = userRef.collection("transactions").doc();
+          tx.set(txRef, {
+            type: "credit_purchase",
+            credits,
+            reference: reference.trim(),
+            packageId: (meta.packageId as string) || null,
+            createdAt: FieldValue.serverTimestamp(),
+          });
+        });
       }
+
+      return res.json({ success: true });
+    } catch (e: unknown) {
+      console.error("[Verify Payment]", e);
+      const msg = e instanceof Error ? e.message : "Verification error";
+      return res.status(500).json({ success: false, error: msg });
     }
+  });
+
+  app.get("/api/cron/reminders", async (_req, res) => {
     try {
       await runAppointmentReminders(db);
-      res.status(200).json({ ok: true });
+      res.json({ ok: true });
     } catch (e: unknown) {
       console.error("[Cron reminders]", e);
-      res.status(500).json({
-        error: e instanceof Error ? e.message : "failed",
-      });
+      res.status(500).json({ ok: false });
     }
   });
 
+  const onVercel = process.env.VERCEL === "1";
   const isProd = process.env.NODE_ENV === "production";
 
-  if (!isProd) {
-    console.log("[Server] Initializing Vite in dev mode...");
+  if (isProd && onVercel) {
+    const distDir = path.join(process.cwd(), "dist");
+    app.use(express.static(distDir));
+    app.get("*", (req, res, next) => {
+      if (req.path.startsWith("/api")) return next();
+      res.sendFile(path.join(distDir, "index.html"), (err) => {
+        if (err) next(err);
+      });
+    });
+    app.use((req, res) => {
+      if (req.path.startsWith("/api")) {
+        return res.status(404).json({ error: "Not found" });
+      }
+      res.status(404).send("Not found");
+    });
+  } else if (!onVercel) {
     const vite = await createViteServer({
+      root: process.cwd(),
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    console.log(`[Server] Production mode: Serving from ${distPath}`);
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
   }
 
   return app;

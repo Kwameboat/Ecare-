@@ -1,5 +1,7 @@
 import type { Express } from "express";
 import { GoogleGenAI, Modality } from "@google/genai";
+import { db } from "./firebase-init.js";
+import { getGeminiApiKey } from "./gemini-key.js";
 
 function buildSystemInstruction(doctors: { name: string; specialty: string }[]) {
   const doctorsList = doctors.map((d) => `${d.name} (${d.specialty})`).join(", ");
@@ -45,19 +47,35 @@ function buildSystemInstruction(doctors: { name: string; specialty: string }[]) 
 }
 
 export function attachGeminiRoutes(app: Express) {
-  app.get("/api/gemini/status", (_req, res) => {
-    const key = process.env.GEMINI_API_KEY?.trim();
-    res.json({
-      ok: true,
-      configured: Boolean(key),
-    });
+  app.get("/api/gemini/status", async (_req, res) => {
+    try {
+      const fromEnv = Boolean(process.env.GEMINI_API_KEY?.trim());
+      let fromFirestore = false;
+      if (!fromEnv) {
+        const snap = await db.collection("settings").doc("gemini").get();
+        const k = snap.data()?.apiKey;
+        fromFirestore = typeof k === "string" && k.trim().length > 0;
+      }
+      const configured = fromEnv || fromFirestore;
+      const source = fromEnv ? "environment" : fromFirestore ? "firestore" : "none";
+      res.json({ ok: true, configured, source });
+    } catch (e: unknown) {
+      console.error("[Gemini status]", e);
+      res.status(500).json({
+        ok: false,
+        configured: false,
+        source: "none",
+        error: e instanceof Error ? e.message : "status failed",
+      });
+    }
   });
 
   app.post("/api/gemini/chat", async (req, res) => {
-    const apiKey = process.env.GEMINI_API_KEY?.trim();
+    const apiKey = await getGeminiApiKey();
     if (!apiKey) {
       return res.status(503).json({
-        error: "GEMINI_API_KEY is not set on the server. Add it in Vercel → Environment Variables (or .env.local for local dev).",
+        error:
+          "No Gemini API key: set GEMINI_API_KEY (Vercel) or save a key below in Admin → API Settings (Firestore).",
       });
     }
 
@@ -97,39 +115,34 @@ export function attachGeminiRoutes(app: Express) {
   });
 
   app.post("/api/gemini/speech", async (req, res) => {
-    const apiKey = process.env.GEMINI_API_KEY?.trim();
+    const apiKey = await getGeminiApiKey();
     if (!apiKey) {
       return res.status(503).json({
-        error: "GEMINI_API_KEY is not set on the server.",
+        error:
+          "No Gemini API key: set GEMINI_API_KEY (Vercel) or save a key below in Admin → API Settings (Firestore).",
       });
     }
 
     try {
       const { text } = req.body as { text?: string };
       if (!text?.trim()) {
-        return res.status(400).json({ error: "text is required" });
+        return res.status(400).json({ error: "text required" });
       }
 
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: "gemini-3.1-flash-tts-preview",
-        contents: [{ parts: [{ text }] }],
+        contents: [{ role: "user", parts: [{ text: text.trim() }] }],
         config: {
           responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: "Kore" },
-            },
-          },
         },
       });
 
-      const audioBase64 =
-        response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data ?? null;
+      const audioBase64 = response.data ?? null;
       res.json({ audioBase64 });
     } catch (e: unknown) {
-      console.error("[Gemini TTS]", e);
-      const msg = e instanceof Error ? e.message : "TTS failed";
+      console.error("[Gemini speech]", e);
+      const msg = e instanceof Error ? e.message : "Gemini speech failed";
       res.status(500).json({ error: msg });
     }
   });

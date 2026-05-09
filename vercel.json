@@ -4,7 +4,7 @@
   "framework": null,
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
   "functions": {
-    "api/index.ts": {
+    "api/index.js": {
       "includeFiles": "{dist/**,public/**,firebase-applet-config.json}"
     }
   },

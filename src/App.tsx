@@ -277,16 +277,50 @@ export default function App() {
   const [geminiAdminStatus, setGeminiAdminStatus] = useState<
     "idle" | "loading" | "ok" | "missing" | "error"
   >("idle");
+  const [geminiKeySource, setGeminiKeySource] = useState<string>("none");
+  const [geminiKeyDraft, setGeminiKeyDraft] = useState("");
+  const [savingGeminiKey, setSavingGeminiKey] = useState(false);
 
   const refreshGeminiAdminStatus = useCallback(async () => {
     try {
       setGeminiAdminStatus("loading");
       const s = await fetchGeminiStatus();
+      setGeminiKeySource(s.source ?? "none");
+      if (!s.ok) {
+        setGeminiAdminStatus("error");
+        return;
+      }
       setGeminiAdminStatus(s.configured ? "ok" : "missing");
     } catch {
       setGeminiAdminStatus("error");
     }
   }, []);
+
+  const saveGeminiKeyToFirestore = async () => {
+    const trimmed = geminiKeyDraft.trim();
+    if (!trimmed) {
+      alert("Paste your Google AI Studio API key first.");
+      return;
+    }
+    setSavingGeminiKey(true);
+    try {
+      await setDoc(
+        doc(db, "settings", "gemini"),
+        { apiKey: trimmed, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+      setGeminiKeyDraft("");
+      await refreshGeminiAdminStatus();
+      alert("API key saved on the server database. Chat uses it unless GEMINI_API_KEY is also set in Vercel (that wins).");
+    } catch (e: unknown) {
+      alert(
+        "Could not save key: " +
+          (e instanceof Error ? e.message : String(e))
+      );
+    } finally {
+      setSavingGeminiKey(false);
+    }
+  };
 
   useEffect(() => {
     if (showAdmin && adminTab === "settings") {
@@ -2163,8 +2197,8 @@ export default function App() {
                         <div className="min-w-0">
                           <h4 className="font-bold text-lg text-white">Google Gemini API</h4>
                           <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                            Chat and voice use your server so the API key stays private. Add{" "}
-                            <code className="text-emerald-400/90">GEMINI_API_KEY</code> to Vercel environment variables.
+                            Chat and voice run on the server so your key stays private. Prefer{" "}
+                            <code className="text-emerald-400/90">GEMINI_API_KEY</code> on Vercel, or save a key here (stored in Firestore; env wins if both exist).
                           </p>
                         </div>
                       </div>
@@ -2173,8 +2207,17 @@ export default function App() {
                           <span className="text-[10px] font-black uppercase text-slate-500">Checking…</span>
                         )}
                         {geminiAdminStatus === "ok" && (
-                          <span className="px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-black uppercase border border-emerald-500/25">
-                            Connected
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-black uppercase border border-emerald-500/25">
+                              Connected
+                            </span>
+                            <span className="text-[10px] font-bold uppercase text-slate-500">
+                              {geminiKeySource === "environment"
+                                ? "Source: Vercel env"
+                                : geminiKeySource === "firestore"
+                                  ? "Source: database"
+                                  : ""}
+                            </span>
                           </span>
                         )}
                         {geminiAdminStatus === "missing" && (
@@ -2199,8 +2242,32 @@ export default function App() {
                         </button>
                       </div>
                     </div>
-                    <div className="rounded-2xl bg-black/30 border border-white/10 p-5 space-y-3 text-xs text-slate-400 leading-relaxed">
-                      <p className="font-bold text-slate-300 text-sm">Setup</p>
+                    <div className="rounded-2xl bg-black/30 border border-white/10 p-5 space-y-4 text-xs text-slate-400 leading-relaxed">
+                      <div className="space-y-2">
+                        <p className="font-bold text-slate-300 text-sm">Save key on server (optional)</p>
+                        <p className="text-[11px] text-slate-500">
+                          Paste your Google AI Studio key and save. Only admins can write; the key is not readable from the client app.
+                        </p>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="password"
+                            autoComplete="off"
+                            placeholder="AIza…"
+                            value={geminiKeyDraft}
+                            onChange={(e) => setGeminiKeyDraft(e.target.value)}
+                            className="flex-1 px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                          />
+                          <button
+                            type="button"
+                            disabled={savingGeminiKey}
+                            onClick={() => void saveGeminiKeyToFirestore()}
+                            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-[10px] font-black uppercase tracking-wider text-white shrink-0"
+                          >
+                            {savingGeminiKey ? "Saving…" : "Save to database"}
+                          </button>
+                        </div>
+                      </div>
+                      <p className="font-bold text-slate-300 text-sm pt-1 border-t border-white/5">Or use Vercel</p>
                       <ol className="list-decimal pl-5 space-y-2 marker:text-blue-500">
                         <li>
                           Create a key in{" "}

@@ -47,7 +47,20 @@ export async function generateSpeech(text: string): Promise<string | null> {
 export async function fetchGeminiStatus(): Promise<{
   ok: boolean;
   configured: boolean;
+  source?: string;
 }> {
   const res = await fetch("/api/gemini/status");
-  return (await res.json()) as { ok: boolean; configured: boolean };
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    configured?: boolean;
+    source?: string;
+  };
+  if (!res.ok) {
+    return { ok: false, configured: false, source: "none" };
+  }
+  return {
+    ok: Boolean(data.ok),
+    configured: Boolean(data.configured),
+    source: data.source ?? "none",
+  };
 }

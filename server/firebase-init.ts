@@ -34,7 +34,10 @@ if (getApps().length === 0) {
 
 console.log(`[Admin] Effective Project ID: ${appInstance.options.projectId || "UNKNOWN"}`);
 
-export const db = getFirestore(appInstance, userDatabaseId || undefined);
+export const db =
+  userDatabaseId !== undefined && userDatabaseId !== ""
+    ? getFirestore(appInstance, userDatabaseId)
+    : getFirestore(appInstance);
 
 async function testConnection() {
   try {

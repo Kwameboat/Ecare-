@@ -1,8 +1,8 @@
 import "dotenv/config";
 import cron from "node-cron";
-import { createHttpApp } from "./server/app";
-import { runAppointmentReminders } from "./server/reminders";
-import { db } from "./server/firebase-init";
+import { createHttpApp } from "./server/app.js";
+import { runAppointmentReminders } from "./server/reminders.js";
+import { db } from "./server/firebase-init.js";
 
 async function main() {
   try {
