@@ -137,7 +137,14 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   if (errInfo.error.toLowerCase().includes('permission')) {
-    alert(`Admin Error: Permission Denied for ${operationType} on ${path}. Please ensure you are logged in as brownalice773@gmail.com`);
+    const isAdminEmail = auth.currentUser?.email?.toLowerCase() === 'brownalice773@gmail.com';
+    if (isAdminEmail) {
+      alert(`Admin Error: Permission Denied for ${operationType} on ${path}. Check Firestore rules and that your Google account email is verified.`);
+    } else if (!auth.currentUser) {
+      alert(`Please sign in to use this feature. (${operationType} on ${path})`);
+    } else {
+      alert(`Permission denied for ${operationType} on ${path}. Contact support if this persists.`);
+    }
   } else if (errInfo.error.toLowerCase().includes('unavailable')) {
     alert(`Connection Error: The backend is currently unreachable. Please check your internet connection or try again in a few minutes.`);
   } else {
