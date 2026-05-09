@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx server.ts",
-    "build": "vite build && esbuild scripts/vercel-api-entry.ts --bundle --platform=node --target=node20 --format=esm --outfile=api/index.js --packages=external",
+    "build": "vite build && esbuild scripts/vercel-api-entry.ts --bundle --platform=node --target=node20 --format=esm --outfile=api/index.js --packages=external --external:vite",
     "start": "cross-env NODE_ENV=production tsx server.ts",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",

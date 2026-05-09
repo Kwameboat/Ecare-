@@ -5,7 +5,6 @@ import serverless from "serverless-http";
 // server/app.ts
 import express from "express";
 import path2 from "path";
-import { createServer as createViteServer } from "vite";
 import cors from "cors";
 import { FieldValue as FieldValue2 } from "firebase-admin/firestore";
 
@@ -411,6 +410,7 @@ async function createHttpApp() {
       res.status(404).send("Not found");
     });
   } else if (!onVercel) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       root: process.cwd(),
       server: { middlewareMode: true },

@@ -1,6 +1,5 @@
 import express, { type Express } from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import cors from "cors";
 import { FieldValue } from "firebase-admin/firestore";
 import { db } from "./firebase-init.js";
@@ -193,6 +192,8 @@ export async function createHttpApp(): Promise<Express> {
       res.status(404).send("Not found");
     });
   } else if (!onVercel) {
+    // Dynamic import only for local dev — never load Vite/Rollup on Vercel (native optional deps break Linux lambdas).
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       root: process.cwd(),
       server: { middlewareMode: true },
