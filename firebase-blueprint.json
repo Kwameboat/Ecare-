@@ -1,0 +1,180 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and credit balance storage",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "creditBalance": { "type": "integer" },
+        "autoTopUp": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "threshold": { "type": "integer" },
+            "packageId": { "type": "string" }
+          }
+        },
+        "paystackAuth": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "displayName", "creditBalance"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Payment records for credit purchases",
+      "type": "object",
+      "properties": {
+        "transactionId": { "type": "string" },
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "credits": { "type": "integer" },
+        "status": { "type": "string", "enum": ["pending", "success", "failed"] },
+        "reference": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "amount", "credits", "status", "reference"]
+    },
+    "ChatSession": {
+      "title": "ChatSession",
+      "description": "Stores user chat history metadata",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "lastUpdate": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A single message in a chat session",
+      "type": "object",
+      "properties": {
+        "role": { "type": "string", "enum": ["user", "model"] },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "serverTimestamp": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["text", "voice", "image"] }
+      },
+      "required": ["role", "content"]
+    },
+    "Doctor": {
+      "title": "Doctor",
+      "description": "Medical professional profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "specialty": { "type": "string" },
+        "email": { "type": "string" },
+        "bio": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "consultationFee": { "type": "number" },
+        "durationMinutes": { "type": "number" },
+        "availability": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "day": { "type": "string" },
+              "startTime": { "type": "string" },
+              "endTime": { "type": "string" }
+            }
+          }
+        },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["name", "specialty", "email", "isActive", "consultationFee", "durationMinutes"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Scheduled medical consultation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "doctorId": { "type": "string" },
+        "doctorName": { "type": "string" },
+        "patientName": { "type": "string" },
+        "dateTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled", "completed"] },
+        "paymentRef": { "type": "string" },
+        "amountPaid": { "type": "number" },
+        "meetLink": { "type": "string" },
+        "notes": { "type": "string" },
+        "reminded": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "doctorId", "dateTime", "status"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notification",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["reminder", "system"] },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "message", "type"]
+    },
+    "AppGlobalConfig": {
+      "title": "AppGlobalConfig",
+      "description": "Global application configuration",
+      "type": "object",
+      "properties": {
+        "logoUrl": { "type": "string" },
+        "appName": { "type": "string" },
+        "tagline": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Main user documents"
+    },
+    "transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Payment transactions"
+    },
+    "users/{userId}/transactions": {
+      "schema": "Transaction",
+      "description": "User specific payment and usage transactions"
+    },
+    "users/{userId}/sessions/{sessionId}": {
+      "schema": "ChatSession",
+      "description": "User specific chat sessions metadata"
+    },
+    "users/{userId}/sessions/{sessionId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Individual messages within a chat session"
+    },
+    "doctors/{doctorId}": {
+      "schema": "Doctor",
+      "description": "Medical professionals database"
+    },
+    "appointments/{appointmentId}": {
+      "schema": "Appointment",
+      "description": "Global appointment records"
+    },
+    "notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User notifications"
+    },
+    "settings/{settingId}": {
+      "schema": "AppGlobalConfig",
+      "description": "Global application settings"
+    }
+  }
+}

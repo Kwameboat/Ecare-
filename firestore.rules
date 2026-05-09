@@ -1,0 +1,152 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 0.1 Global Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isAdmin() { 
+      return isSignedIn() && 
+             request.auth.token.email.matches('(?i)brownalice773@gmail.com') && 
+             request.auth.token.email_verified == true; 
+    }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // 1. User Profile Rules
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.keys().hasAll(['email', 'displayName', 'creditBalance']) &&
+               data.email is string && data.email.size() <= 256 &&
+               data.displayName is string && data.displayName.size() <= 128 &&
+               (data.creditBalance is int || data.creditBalance is number) && data.creditBalance >= 0 &&
+               (!data.keys().contains('autoTopUp') || (
+                 data.autoTopUp is map && 
+                 data.autoTopUp.enabled is bool &&
+                 data.autoTopUp.threshold is int &&
+                 data.autoTopUp.packageId is string
+               ));
+      }
+
+      // Admin has full access
+      allow read, write: if isAdmin();
+      
+      // User specific rules
+      allow read, list: if isOwner(userId);
+      
+      allow create: if isOwner(userId) && 
+                      isValidUser(incoming()) && 
+                      incoming().creditBalance == 24 &&
+                      !incoming().keys().contains('paystackAuth') &&
+                      incoming().createdAt == request.time;
+      
+      allow update: if isOwner(userId) && isValidUser(incoming()) && (
+        // Action: Credit Deduction (Implicit by server or explicit use)
+        (incoming().diff(existing()).affectedKeys().hasOnly(['creditBalance', 'updatedAt']) && 
+         incoming().creditBalance <= existing().creditBalance &&
+         incoming().updatedAt == request.time) ||
+        // Action: Profile Update
+        (incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']) &&
+         incoming().updatedAt == request.time) ||
+        // Action: Auto Top-up Settings
+        (incoming().diff(existing()).affectedKeys().hasOnly(['autoTopUp', 'updatedAt']) &&
+         incoming().updatedAt == request.time)
+      );
+
+      // Transactions Sub-collection
+      match /transactions/{transactionId} {
+        allow read, list: if isOwner(userId) || isAdmin();
+        allow create: if isAdmin(); // Only server can create
+      }
+
+      // Chat Session Rules
+      match /sessions/{sessionId} {
+        allow get: if (isOwner(userId) || isAdmin()) && isValidId(sessionId);
+        allow list: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && 
+                        isValidId(sessionId) && 
+                        incoming().userId == userId &&
+                        incoming().createdAt == request.time;
+        allow update: if isOwner(userId) && isValidId(sessionId) && (
+          (incoming().diff(existing()).affectedKeys().hasOnly(['lastUpdate']) && incoming().lastUpdate == request.time) ||
+          (incoming().diff(existing()).affectedKeys().hasOnly(['title', 'lastUpdate']) && incoming().lastUpdate == request.time)
+        );
+        
+        // Messages Sub-collection
+        match /messages/{messageId} {
+          function isValidMessage(data) {
+            return data.keys().hasAll(['role', 'content', 'timestamp']) &&
+                   data.role in ['user', 'model'] &&
+                   data.content is string &&
+                   data.content.size() <= 50000;
+          }
+
+          allow get: if (isOwner(userId) || isAdmin()) && isValidId(sessionId) && isValidId(messageId);
+          allow list: if isOwner(userId) || isAdmin();
+          allow create: if isOwner(userId) && isValidId(sessionId) && isValidMessage(incoming());
+          allow update, delete: if isAdmin();
+        }
+      }
+    }
+
+    // 2. Doctor Rules
+    match /doctors/{doctorId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 3. Appointment Rules
+    match /appointments/{appointmentId} {
+      function isValidAppointment(data) {
+        return data.keys().hasAll(['userId', 'doctorId', 'dateTime', 'status']) &&
+               data.userId is string &&
+               data.doctorId is string &&
+               data.status in ['pending', 'confirmed', 'cancelled', 'completed'] &&
+               data.dateTime is timestamp;
+      }
+      
+      allow read, list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      
+      allow create: if isSignedIn() && 
+                      incoming().userId == request.auth.uid && 
+                      isValidAppointment(incoming()) &&
+                      incoming().createdAt == request.time;
+      
+      allow update: if (
+        (isOwner(existing().userId) && 
+         incoming().status == 'cancelled' && 
+         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+        isAdmin()
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // 4. Notification Rules
+    match /notifications/{notificationId} {
+      function isValidNotification(data) {
+        return data.keys().hasAll(['userId', 'title', 'message', 'type']) &&
+               data.userId is string &&
+               data.title is string &&
+               data.message is string &&
+               data.type in ['reminder', 'system'];
+      }
+
+      allow read, list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isOwner(existing().userId) && 
+                      incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
+      allow create, delete: if isAdmin();
+    }
+
+    // 5. Admin Settings
+    match /settings/{settingId} {
+      allow read: if isSignedIn(); // All authenticated users can read settings
+      allow write: if isAdmin();
+    }
+  }
+}
