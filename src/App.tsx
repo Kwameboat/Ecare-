@@ -3,7 +3,7 @@ import { Send, Image as ImageIcon, Mic, LogOut, HeartPulse, CreditCard, StopCirc
 import { useState, useRef, useEffect } from "react";
 import { auth, db } from "./lib/firebase";
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut, User } from "firebase/auth";
-import { doc, getDoc, setDoc, onSnapshot, updateDoc, serverTimestamp, arrayUnion, collection, query, where, getDocs, addDoc, orderBy, increment } from "firebase/firestore";
+import { doc, getDoc, setDoc, onSnapshot, updateDoc, serverTimestamp, arrayUnion, collection, query, where, getDocs, addDoc, orderBy, increment, getDocFromServer, deleteDoc } from "firebase/firestore";
 import { generateHealthResponse, generateSpeech } from "./lib/gemini";
 import ReactMarkdown from "react-markdown";
 import { cn } from "./lib/utils";
@@ -264,7 +264,6 @@ export default function App() {
     // Connection health check
     const checkConnection = async () => {
       try {
-        const { getDocFromServer } = await import("firebase/firestore");
         await getDocFromServer(doc(db, "settings", "app"));
         setConnectionStatus('ok');
         console.log("Firestore connection healthy.");
@@ -932,7 +931,6 @@ export default function App() {
     if (!window.confirm("Are you sure you want to delete this user? This cannot be undone.")) return;
     const path = `users/${userId}`;
     try {
-      const { deleteDoc } = await import("firebase/firestore");
       await deleteDoc(doc(db, "users", userId));
       setAllUsers(prev => prev.filter(u => u.id !== userId));
       if (foundUser?.id === userId) setFoundUser(null);
@@ -1041,7 +1039,6 @@ export default function App() {
   const deleteDoctor = async (id: string) => {
     if (!window.confirm("Remove this doctor?")) return;
     try {
-      const { deleteDoc } = await import("firebase/firestore");
       await deleteDoc(doc(db, "doctors", id));
       fetchDoctors();
     } catch (e) {
@@ -1189,7 +1186,7 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="z-10 flex flex-col items-center space-y-8 text-center"
         >
-          <div className="w-24 h-24 bg-white rounded-[32px] flex items-center justify-center shadow-2xl shadow-blue-500/20 ring-1 ring-white/20 overflow-hidden p-2">
+          <div className="logo-wrap w-24 h-24 bg-white rounded-[32px] flex items-center justify-center shadow-2xl shadow-blue-500/20 ring-1 ring-white/20 overflow-hidden p-2">
             {settings.logoUrl ? (
               <img 
                 src={settings.logoUrl} 
@@ -1202,7 +1199,7 @@ export default function App() {
                 }}
               />
             ) : null}
-            <HeartPulse className="text-blue-600 w-14 h-14 hidden [[.fallback-icon]_&]:block" />
+            <HeartPulse className="logo-fallback-icon text-blue-600 w-14 h-14 hidden" />
             {!settings.logoUrl && <HeartPulse className="text-blue-600 w-14 h-14" />}
           </div>
           <div className="space-y-3">

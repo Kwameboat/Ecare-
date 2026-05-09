@@ -37,3 +37,8 @@
 .markdown-body ul {
   @apply list-disc ml-4 mb-2;
 }
+
+/* Logo fallback when remote logo fails (see App.tsx onError) */
+.logo-wrap.fallback-icon .logo-fallback-icon {
+  display: block;
+}

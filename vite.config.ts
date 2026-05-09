@@ -7,6 +7,9 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   return {
+    build: {
+      chunkSizeWarningLimit: 2000,
+    },
     plugins: [
       react(),
       tailwindcss(),
