@@ -3,6 +3,29 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import { db } from "./firebase-init.js";
 import { getGeminiApiKey } from "./gemini-key.js";
 
+/** Defaults use widely available AI Studio models; override via Vercel env if needed. */
+const CHAT_MODEL = process.env.GEMINI_CHAT_MODEL?.trim() || "gemini-2.0-flash";
+const SPEECH_MODEL = process.env.GEMINI_SPEECH_MODEL?.trim() || "gemini-2.5-flash-tts";
+
+function normalizeChatContents(
+  history: unknown[],
+  prompt: string,
+  mediaParts: unknown[]
+): object[] {
+  const out: object[] = [];
+  for (const h of history || []) {
+    if (!h || typeof h !== "object") continue;
+    const o = h as Record<string, unknown>;
+    if (o.role !== "user" && o.role !== "model") continue;
+    if (!Array.isArray(o.parts) || o.parts.length === 0) continue;
+    out.push({ role: o.role, parts: o.parts });
+  }
+  const media = Array.isArray(mediaParts) ? (mediaParts as object[]) : [];
+  const userParts: object[] = [{ text: prompt || "User sent audio/image" }, ...media];
+  out.push({ role: "user", parts: userParts });
+  return out;
+}
+
 function buildSystemInstruction(doctors: { name: string; specialty: string }[]) {
   const doctorsList = doctors.map((d) => `${d.name} (${d.specialty})`).join(", ");
   return `
@@ -89,16 +112,10 @@ export function attachGeminiRoutes(app: Express) {
 
       const ai = new GoogleGenAI({ apiKey });
       const systemInstruction = buildSystemInstruction(doctors || []);
-      const contents = [
-        ...((history || []) as object[]),
-        {
-          role: "user",
-          parts: [{ text: prompt || "User sent audio/image" }, ...(mediaParts || [])],
-        },
-      ];
+      const contents = normalizeChatContents(history || [], prompt || "", mediaParts || []);
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: CHAT_MODEL,
         contents,
         config: {
           systemInstruction,
@@ -131,7 +148,7 @@ export function attachGeminiRoutes(app: Express) {
 
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-tts-preview",
+        model: SPEECH_MODEL,
         contents: [{ role: "user", parts: [{ text: text.trim() }] }],
         config: {
           responseModalities: [Modality.AUDIO],
