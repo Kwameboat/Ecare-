@@ -331,20 +331,27 @@ async function createHttpApp() {
       imageGen: 5,
       voicePrompt: 2
     };
-    let points = costs.textPrompt;
-    if (type === "voice") points = costs.voicePrompt;
+    const pickPoints = (v, fallback) => {
+      const n = Math.floor(Number(v));
+      return Number.isFinite(n) && n >= 0 ? n : fallback;
+    };
+    let points = pickPoints(costs.textPrompt, 1);
+    if (type === "voice") points = pickPoints(costs.voicePrompt, 2);
     if (type === "image" || type === "mixed" || type === "recommendation")
-      points = costs.imageGen;
+      points = pickPoints(costs.imageGen, 5);
+    if (points < 1) points = 1;
     try {
       console.log(`[Deduct Credits] userId: ${userId}, type: ${type}`);
       const userRef = db.collection("users").doc(userId);
       await db.runTransaction(async (transaction) => {
         const userDoc = await transaction.get(userRef);
         if (!userDoc.exists) throw new Error("User not found");
-        const balance = userDoc.data()?.creditBalance ?? 0;
-        if (balance < points) throw new Error("Insufficient credits");
+        const rawBal = userDoc.data()?.creditBalance;
+        const balance = Math.floor(Number(rawBal));
+        const balOk = Number.isFinite(balance) ? balance : 0;
+        if (balOk < points) throw new Error("Insufficient credits");
         transaction.update(userRef, {
-          creditBalance: balance - points,
+          creditBalance: balOk - points,
           updatedAt: FieldValue2.serverTimestamp()
         });
       });

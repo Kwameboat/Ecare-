@@ -78,10 +78,15 @@ export async function createHttpApp(): Promise<Express> {
       voicePrompt: 2,
     };
 
-    let points = costs.textPrompt as number;
-    if (type === "voice") points = costs.voicePrompt as number;
+    const pickPoints = (v: unknown, fallback: number) => {
+      const n = Math.floor(Number(v));
+      return Number.isFinite(n) && n >= 0 ? n : fallback;
+    };
+    let points = pickPoints(costs.textPrompt, 1);
+    if (type === "voice") points = pickPoints(costs.voicePrompt, 2);
     if (type === "image" || type === "mixed" || type === "recommendation")
-      points = costs.imageGen as number;
+      points = pickPoints(costs.imageGen, 5);
+    if (points < 1) points = 1;
 
     try {
       console.log(`[Deduct Credits] userId: ${userId}, type: ${type}`);
@@ -91,10 +96,12 @@ export async function createHttpApp(): Promise<Express> {
       await db.runTransaction(async (transaction) => {
         const userDoc = await transaction.get(userRef);
         if (!userDoc.exists) throw new Error("User not found");
-        const balance = (userDoc.data()?.creditBalance as number) ?? 0;
-        if (balance < points) throw new Error("Insufficient credits");
+        const rawBal = userDoc.data()?.creditBalance;
+        const balance = Math.floor(Number(rawBal));
+        const balOk = Number.isFinite(balance) ? balance : 0;
+        if (balOk < points) throw new Error("Insufficient credits");
         transaction.update(userRef, {
-          creditBalance: balance - points,
+          creditBalance: balOk - points,
           updatedAt: FieldValue.serverTimestamp(),
         });
       });

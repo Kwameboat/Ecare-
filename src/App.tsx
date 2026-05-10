@@ -87,6 +87,29 @@ interface AppSettings {
   creditCosts?: CreditCosts;
 }
 
+/** Firestore may return numbers as int/float; admin edits can leave strings — normalize for comparisons. */
+function coerceCreditBalance(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.floor(value);
+  if (typeof value === "string") {
+    const n = Number(value.trim());
+    return Number.isFinite(n) ? Math.floor(n) : 0;
+  }
+  return 0;
+}
+
+function resolveDeductCost(
+  costs: CreditCosts | undefined,
+  type: "text" | "voice" | "image" | "recommendation" | "mixed"
+): number {
+  const base = costs ?? { textPrompt: 1, imageGen: 5, voicePrompt: 2 };
+  let raw: unknown = base.textPrompt;
+  if (type === "voice") raw = base.voicePrompt;
+  if (type === "image" || type === "mixed" || type === "recommendation") raw = base.imageGen;
+  const n = Math.floor(Number(raw));
+  if (!Number.isFinite(n) || n < 0) return 1;
+  return n;
+}
+
 interface Appointment {
   id: string;
   userId: string;
@@ -604,17 +627,22 @@ export default function App() {
               setCredits(24);
             } else {
               const userData = userSnap.data();
-              setCredits(userData.creditBalance || 0);
-              if (userData.autoTopUp) setAutoTopUp(userData.autoTopUp);
-              
-              onSnapshot(userDocRef, (doc) => {
-                const data = doc.data();
-                setCredits(data?.creditBalance || 0);
-                if (data?.autoTopUp) setAutoTopUp(data.autoTopUp);
-              }, (error) => {
-                handleFirestoreError(error, OperationType.GET, path);
-              });
+              setCredits(coerceCreditBalance(userData?.creditBalance));
+              if (userData?.autoTopUp) setAutoTopUp(userData.autoTopUp);
             }
+
+            // Always listen for balance changes (was missing for newly created profiles).
+            onSnapshot(
+              userDocRef,
+              (snap) => {
+                const data = snap.data();
+                setCredits(coerceCreditBalance(data?.creditBalance));
+                if (data?.autoTopUp) setAutoTopUp(data.autoTopUp);
+              },
+              (error) => {
+                handleFirestoreError(error, OperationType.GET, path);
+              }
+            );
 
             // Fetch Transactions
             const transQuery = query(
@@ -723,14 +751,29 @@ export default function App() {
 
   const deductCredits = async (type: 'text' | 'voice' | 'image' | 'recommendation' | 'mixed') => {
     if (!user) return false;
-    const costs = settings.creditCosts || { textPrompt: 1, imageGen: 5, voicePrompt: 2 };
-    let cost = costs.textPrompt;
-    if (type === 'voice') cost = costs.voicePrompt;
-    if (type === 'image' || type === 'mixed' || type === 'recommendation') cost = costs.imageGen;
+    const mergedCosts = settings.creditCosts ?? creditCosts;
+    const cost = resolveDeductCost(mergedCosts, type);
 
-    if (credits < cost) {
-      alert("Not enough credits! Please top up.");
-      return false;
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const balSnap = await getDoc(userRef);
+      const liveBalance = balSnap.exists()
+        ? coerceCreditBalance(balSnap.data()?.creditBalance)
+        : 0;
+      setCredits(liveBalance);
+
+      if (liveBalance < cost) {
+        alert(
+          `Not enough credits! Your account has ${liveBalance}, this action needs ${cost}. Please top up.`
+        );
+        return false;
+      }
+    } catch (e) {
+      console.error("[Credits] Could not read balance from Firestore:", e);
+      if (coerceCreditBalance(credits) < cost) {
+        alert("Not enough credits! Please top up.");
+        return false;
+      }
     }
 
     try {

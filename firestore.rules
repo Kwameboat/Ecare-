@@ -24,7 +24,7 @@ service cloud.firestore {
         return data.keys().hasAll(['email', 'displayName', 'creditBalance']) &&
                data.email is string && data.email.size() <= 256 &&
                data.displayName is string && data.displayName.size() <= 128 &&
-               (data.creditBalance is int || data.creditBalance is number) && data.creditBalance >= 0 &&
+               (data.creditBalance is int || data.creditBalance is float || data.creditBalance is number) && data.creditBalance >= 0 &&
                (!data.keys().contains('autoTopUp') || (
                  data.autoTopUp is map && 
                  data.autoTopUp.enabled is bool &&
