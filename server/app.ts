@@ -6,6 +6,22 @@ import { db, hasFirebaseAdminCredentials } from "./firebase-init.js";
 import { runAppointmentReminders } from "./reminders.js";
 import { attachGeminiRoutes } from "./gemini-routes.js";
 
+/** Avoid Vercel 504 when Firestore hangs (wrong DB / network) — fail fast so the client can deduct. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label}: timed out after ${ms}ms`)), ms);
+    promise
+      .then((v) => {
+        clearTimeout(timer);
+        resolve(v);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
 export async function createHttpApp(): Promise<Express> {
   const app = express();
 
@@ -70,46 +86,65 @@ export async function createHttpApp(): Promise<Express> {
       });
     }
 
-    const settingsSnap = await db.collection("settings").doc("app").get();
-    const settings = settingsSnap.exists ? settingsSnap.data() : {};
-    const costs = settings?.creditCosts || {
+    const pickPoints = (v: unknown, fallback: number) => {
+      const n = Math.floor(Number(v));
+      return Number.isFinite(n) && n >= 0 ? n : fallback;
+    };
+    const defaultCosts = {
       textPrompt: 1,
       imageGen: 5,
       voicePrompt: 2,
     };
 
-    const pickPoints = (v: unknown, fallback: number) => {
-      const n = Math.floor(Number(v));
-      return Number.isFinite(n) && n >= 0 ? n : fallback;
-    };
-    let points = pickPoints(costs.textPrompt, 1);
-    if (type === "voice") points = pickPoints(costs.voicePrompt, 2);
-    if (type === "image" || type === "mixed" || type === "recommendation")
-      points = pickPoints(costs.imageGen, 5);
-    if (points < 1) points = 1;
+    const firestoreBudgetMs = Math.min(
+      Number(process.env.DEDUCT_FIRESTORE_TIMEOUT_MS) || 9_000,
+      25_000
+    );
 
     try {
       console.log(`[Deduct Credits] userId: ${userId}, type: ${type}`);
 
-      const userRef = db.collection("users").doc(userId);
+      await withTimeout(
+        (async () => {
+          const settingsSnap = await db.collection("settings").doc("app").get();
+          const settingsData = settingsSnap.exists ? settingsSnap.data() : {};
+          const costsLive = settingsData?.creditCosts || defaultCosts;
+          let pts = pickPoints(costsLive.textPrompt, 1);
+          if (type === "voice") pts = pickPoints(costsLive.voicePrompt, 2);
+          if (type === "image" || type === "mixed" || type === "recommendation")
+            pts = pickPoints(costsLive.imageGen, 5);
+          const pointsFinal = pts < 1 ? 1 : pts;
 
-      await db.runTransaction(async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        if (!userDoc.exists) throw new Error("User not found");
-        const rawBal = userDoc.data()?.creditBalance;
-        const balance = Math.floor(Number(rawBal));
-        const balOk = Number.isFinite(balance) ? balance : 0;
-        if (balOk < points) throw new Error("Insufficient credits");
-        transaction.update(userRef, {
-          creditBalance: balOk - points,
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-      });
+          const userRef = db.collection("users").doc(userId);
+          await db.runTransaction(async (transaction) => {
+            const userDoc = await transaction.get(userRef);
+            if (!userDoc.exists) throw new Error("User not found");
+            const rawBal = userDoc.data()?.creditBalance;
+            const balance = Math.floor(Number(rawBal));
+            const balOk = Number.isFinite(balance) ? balance : 0;
+            if (balOk < pointsFinal) throw new Error("Insufficient credits");
+            transaction.update(userRef, {
+              creditBalance: balOk - pointsFinal,
+              updatedAt: FieldValue.serverTimestamp(),
+            });
+          });
+        })(),
+        firestoreBudgetMs,
+        "deduct_credits"
+      );
 
       res.json({ success: true });
     } catch (e: unknown) {
       console.error("[Deduct Credits]", e);
       const msg = e instanceof Error ? e.message : "Deduction failed";
+      if (msg.includes("timed out after")) {
+        return res.status(503).json({
+          success: false,
+          code: "DEDUCT_TIMEOUT",
+          error:
+            "Server Firestore did not respond in time. The app will try client-side deduction.",
+        });
+      }
       res.status(400).json({ success: false, error: msg });
     }
   });

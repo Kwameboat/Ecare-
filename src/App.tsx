@@ -776,54 +776,78 @@ export default function App() {
       }
     }
 
+    const tryClientDeduct = async (): Promise<boolean> => {
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        creditBalance: increment(-cost),
+        updatedAt: serverTimestamp(),
+      });
+      return true;
+    };
+
     try {
       const ctrl = new AbortController();
-      const tid = setTimeout(() => ctrl.abort(), 45_000);
-      const resp = await fetch('/api/deduct-credits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.uid, type: type === 'mixed' ? 'image' : type }),
-        signal: ctrl.signal,
-      }).finally(() => clearTimeout(tid));
-      
-      const text = await resp.text();
-      let data;
+      const tid = setTimeout(() => ctrl.abort(), 15_000);
+      let resp: Response;
       try {
-        data = JSON.parse(text);
-      } catch (parseError) {
-        console.warn("Server returned non-JSON response (possibly starting up). Using client-side fallback.");
-        // We set data to a failure state to trigger the fallback below
-        data = { success: false };
+        resp = await fetch("/api/deduct-credits", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: user.uid, type: type === "mixed" ? "image" : type }),
+          signal: ctrl.signal,
+        });
+      } finally {
+        clearTimeout(tid);
       }
-      
+
+      const text = await resp.text();
+      let data: { success?: boolean; code?: string; error?: string } = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = {};
+      }
+
       if (resp.ok && data?.success) {
         return true;
       }
 
-      if (resp.status === 503 && data?.code === "MISSING_FIREBASE_ADMIN") {
-        console.warn(
-          "[Credits] FIREBASE_SERVICE_ACCOUNT_JSON missing on server — using client-side deduction.",
-          data.error
-        );
+      const serverSaysUseClient =
+        resp.status === 503 &&
+        (data?.code === "MISSING_FIREBASE_ADMIN" || data?.code === "DEDUCT_TIMEOUT");
+      const gatewayTimeout = resp.status === 504 || resp.status === 502;
+
+      if (serverSaysUseClient) {
+        console.warn("[Credits] Server cannot deduct in time or has no Admin SDK — client-side deduction.", data?.code);
+      } else if (gatewayTimeout) {
+        console.warn("[Credits] Gateway timeout from /api/deduct-credits — client-side deduction.");
+      } else if (!resp.ok && data?.error === "Insufficient credits") {
+        alert("Not enough credits (verified on server). Please top up.");
+        return false;
       }
-      
-      // Fallback to client-side deduction if server fails or returns error
-      console.warn("Server deduction failed, attempting client-side fallback...");
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
-        creditBalance: increment(-cost),
-        updatedAt: serverTimestamp()
-      });
+
+      await tryClientDeduct();
       return true;
     } catch (e: any) {
-      console.error("Deduct fallback error:", e);
-      const msg =
-        e?.name === "AbortError"
-          ? "Credit check timed out. Check network or try again."
-          : e?.message || String(e);
-      alert("Error processing credits: " + msg);
+      if (e?.name === "AbortError") {
+        console.warn("[Credits] Deduct request timed out — trying client-side deduction.");
+        try {
+          await tryClientDeduct();
+          return true;
+        } catch (e2: any) {
+          alert("Credit deduction failed: " + (e2?.message || String(e2)));
+          return false;
+        }
+      }
+      console.error("Deduct error:", e);
+      try {
+        await tryClientDeduct();
+        return true;
+      } catch (e2: any) {
+        alert("Error processing credits: " + (e2?.message || String(e)));
+        return false;
+      }
     }
-    return false;
   };
 
   const playAudio = async (text: string) => {
