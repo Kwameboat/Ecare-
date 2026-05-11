@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "jab-digital-hub-automation"
-  }
+    "default": "jab-digital-hub-automation",
+    "staging": "jab-digital-hub-automation"
+  },
+  "targets": {},
+  "etags": {}
 }

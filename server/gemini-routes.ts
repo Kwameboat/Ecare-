@@ -6,6 +6,29 @@ import { getGeminiApiKey } from "./gemini-key.js";
 /** Defaults use widely available AI Studio models; override via Vercel env if needed. */
 const CHAT_MODEL = process.env.GEMINI_CHAT_MODEL?.trim() || "gemini-2.0-flash";
 const SPEECH_MODEL = process.env.GEMINI_SPEECH_MODEL?.trim() || "gemini-2.5-flash-tts";
+const CHAT_TIMEOUT_MS = Math.min(
+  Number(process.env.GEMINI_CHAT_TIMEOUT_MS) || 30_000,
+  120_000
+);
+const SPEECH_TIMEOUT_MS = Math.min(
+  Number(process.env.GEMINI_SPEECH_TIMEOUT_MS) || 25_000,
+  120_000
+);
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms);
+    promise
+      .then((v) => {
+        clearTimeout(timer);
+        resolve(v);
+      })
+      .catch((e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
+  });
+}
 
 function normalizeChatContents(
   history: unknown[],
@@ -118,13 +141,17 @@ export function attachGeminiRoutes(app: Express) {
       const systemInstruction = buildSystemInstruction(doctors || []);
       const contents = normalizeChatContents(history || [], prompt || "", mediaParts || []);
 
-      const response = await ai.models.generateContent({
-        model: CHAT_MODEL,
-        contents,
-        config: {
-          systemInstruction,
-        },
-      });
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: CHAT_MODEL,
+          contents,
+          config: {
+            systemInstruction,
+          },
+        }),
+        CHAT_TIMEOUT_MS,
+        "gemini_chat"
+      );
 
       const text = response.text ?? "";
       res.json({ text });
@@ -151,13 +178,17 @@ export function attachGeminiRoutes(app: Express) {
       }
 
       const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: SPEECH_MODEL,
-        contents: [{ role: "user", parts: [{ text: text.trim() }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-        },
-      });
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: SPEECH_MODEL,
+          contents: [{ role: "user", parts: [{ text: text.trim() }] }],
+          config: {
+            responseModalities: [Modality.AUDIO],
+          },
+        }),
+        SPEECH_TIMEOUT_MS,
+        "gemini_speech"
+      );
 
       const audioBase64 = response.data ?? null;
       res.json({ audioBase64 });

@@ -1028,6 +1028,7 @@ export default function App() {
           timestamp: new Date()
         };
         setMessages(prev => [...prev, errMsg]);
+        saveMessage(errMsg);
       }
     } finally {
       setIsTyping(false);

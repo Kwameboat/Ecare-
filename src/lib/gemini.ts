@@ -25,7 +25,7 @@ export async function generateHealthResponse(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, history, mediaParts, doctors }),
       },
-      120_000
+      45_000
     );
   } catch (e: unknown) {
     const name = e instanceof Error ? e.name : (e as { name?: string })?.name;

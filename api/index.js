@@ -130,6 +130,26 @@ async function getGeminiApiKey() {
 // server/gemini-routes.ts
 var CHAT_MODEL = process.env.GEMINI_CHAT_MODEL?.trim() || "gemini-2.0-flash";
 var SPEECH_MODEL = process.env.GEMINI_SPEECH_MODEL?.trim() || "gemini-2.5-flash-tts";
+var CHAT_TIMEOUT_MS = Math.min(
+  Number(process.env.GEMINI_CHAT_TIMEOUT_MS) || 3e4,
+  12e4
+);
+var SPEECH_TIMEOUT_MS = Math.min(
+  Number(process.env.GEMINI_SPEECH_TIMEOUT_MS) || 25e3,
+  12e4
+);
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms);
+    promise.then((v) => {
+      clearTimeout(timer);
+      resolve(v);
+    }).catch((e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+  });
+}
 function normalizeChatContents(history, prompt, mediaParts) {
   const out = [];
   for (const h of history || []) {
@@ -225,13 +245,17 @@ function attachGeminiRoutes(app) {
       const ai = new GoogleGenAI({ apiKey });
       const systemInstruction = buildSystemInstruction(doctors || []);
       const contents = normalizeChatContents(history || [], prompt || "", mediaParts || []);
-      const response = await ai.models.generateContent({
-        model: CHAT_MODEL,
-        contents,
-        config: {
-          systemInstruction
-        }
-      });
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: CHAT_MODEL,
+          contents,
+          config: {
+            systemInstruction
+          }
+        }),
+        CHAT_TIMEOUT_MS,
+        "gemini_chat"
+      );
       const text = response.text ?? "";
       res.json({ text });
     } catch (e) {
@@ -253,13 +277,17 @@ function attachGeminiRoutes(app) {
         return res.status(400).json({ error: "text required" });
       }
       const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: SPEECH_MODEL,
-        contents: [{ role: "user", parts: [{ text: text.trim() }] }],
-        config: {
-          responseModalities: [Modality.AUDIO]
-        }
-      });
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: SPEECH_MODEL,
+          contents: [{ role: "user", parts: [{ text: text.trim() }] }],
+          config: {
+            responseModalities: [Modality.AUDIO]
+          }
+        }),
+        SPEECH_TIMEOUT_MS,
+        "gemini_speech"
+      );
       const audioBase64 = response.data ?? null;
       res.json({ audioBase64 });
     } catch (e) {
@@ -271,7 +299,7 @@ function attachGeminiRoutes(app) {
 }
 
 // server/app.ts
-function withTimeout(promise, ms, label) {
+function withTimeout2(promise, ms, label) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label}: timed out after ${ms}ms`)), ms);
     promise.then((v) => {
@@ -351,7 +379,7 @@ async function createHttpApp() {
     );
     try {
       console.log(`[Deduct Credits] userId: ${userId}, type: ${type}`);
-      await withTimeout(
+      await withTimeout2(
         (async () => {
           const settingsSnap = await db.collection("settings").doc("app").get();
           const settingsData = settingsSnap.exists ? settingsSnap.data() : {};
