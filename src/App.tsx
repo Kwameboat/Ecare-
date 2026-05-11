@@ -963,33 +963,27 @@ export default function App() {
       setAttachments([]);
 
       try {
-      const history = messages.map(m => {
-        let parts: any[] = [{ text: m.content }];
-        if (m.attachments) {
-          m.attachments.forEach(att => {
-            if (att.type.startsWith('image/') || att.type === 'application/pdf') {
-              parts.push({
-                inlineData: {
-                  mimeType: att.type,
-                  data: att.data.split(',')[1]
-                }
-              });
-            }
-          });
-        }
-        return { role: m.role, parts };
-      });
+      // Keep history text-only and bounded; binary payloads from old turns can explode request size.
+      const history = messages.slice(-12).map(m => ({
+        role: m.role,
+        parts: [{ text: m.content }],
+      }));
 
       let mediaParts = [];
       
-      // Handle current attachments
+      // Handle current attachments (cap count/size to avoid model request timeouts)
       if (userMsg.attachments) {
-        userMsg.attachments.forEach(att => {
+        userMsg.attachments.slice(0, 2).forEach(att => {
           if (att.type.startsWith('image/') || att.type === 'application/pdf') {
+            const b64 = att.data.split(',')[1] || "";
+            if (b64.length > 2_000_000) {
+              console.warn("[Chat] Skipping oversized attachment for Gemini request.");
+              return;
+            }
             mediaParts.push({
               inlineData: {
                 mimeType: att.type,
-                data: att.data.split(',')[1]
+                data: b64
               }
             });
           }
