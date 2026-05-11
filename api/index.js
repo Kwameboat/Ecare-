@@ -111,14 +111,33 @@ async function runAppointmentReminders(db2) {
 import { GoogleGenAI, Modality } from "@google/genai";
 
 // server/gemini-key.ts
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms);
+    promise.then((v) => {
+      clearTimeout(timer);
+      resolve(v);
+    }).catch((e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+  });
+}
 async function getGeminiApiKey() {
   const fromEnv = process.env.GEMINI_API_KEY?.trim();
   if (fromEnv) return fromEnv;
+  if (process.env.VERCEL === "1" && process.env.ALLOW_FIRESTORE_GEMINI_KEY_FALLBACK !== "1") {
+    return null;
+  }
   if (!hasFirebaseAdminCredentials()) {
     return null;
   }
   try {
-    const snap = await db.collection("settings").doc("gemini").get();
+    const snap = await withTimeout(
+      db.collection("settings").doc("gemini").get(),
+      4e3,
+      "gemini_key_firestore_read"
+    );
     const k = snap.data()?.apiKey;
     if (typeof k === "string" && k.trim().length > 0) return k.trim();
   } catch (e) {
@@ -138,7 +157,7 @@ var REST_CHAT_TIMEOUT_MS = Math.min(
   Number(process.env.GEMINI_CHAT_REST_TIMEOUT_MS) || 25e3,
   12e4
 );
-function withTimeout(promise, ms, label) {
+function withTimeout2(promise, ms, label) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms);
     promise.then((v) => {
@@ -268,8 +287,11 @@ function attachGeminiRoutes(app) {
     }
   });
   app.post("/api/gemini/chat", async (req, res) => {
+    const startedAt = Date.now();
+    console.log("[Gemini chat] start");
     const apiKey = await getGeminiApiKey();
     if (!apiKey) {
+      console.warn("[Gemini chat] missing API key (env/firestore fallback)");
       return res.status(503).json({
         error: "No Gemini API key: set GEMINI_API_KEY (Vercel) or save a key below in Admin \u2192 API Settings (Firestore)."
       });
@@ -279,10 +301,14 @@ function attachGeminiRoutes(app) {
       const systemInstruction = buildSystemInstruction(doctors || []);
       const contents = normalizeChatContents(history || [], prompt || "", mediaParts || []);
       const text = await generateChatViaRest(apiKey, systemInstruction, contents);
+      console.log(`[Gemini chat] success in ${Date.now() - startedAt}ms`);
       res.json({ text });
     } catch (e) {
       console.error("[Gemini chat]", e);
       const msg = e instanceof Error ? e.message : "Gemini request failed";
+      if (msg.includes("timeout")) {
+        return res.status(504).json({ error: msg });
+      }
       res.status(500).json({ error: msg });
     }
   });
@@ -299,7 +325,7 @@ function attachGeminiRoutes(app) {
         return res.status(400).json({ error: "text required" });
       }
       const ai = new GoogleGenAI({ apiKey });
-      const response = await withTimeout(
+      const response = await withTimeout2(
         ai.models.generateContent({
           model: SPEECH_MODEL,
           contents: [{ role: "user", parts: [{ text: text.trim() }] }],
@@ -321,7 +347,7 @@ function attachGeminiRoutes(app) {
 }
 
 // server/app.ts
-function withTimeout2(promise, ms, label) {
+function withTimeout3(promise, ms, label) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label}: timed out after ${ms}ms`)), ms);
     promise.then((v) => {
@@ -401,7 +427,7 @@ async function createHttpApp() {
     );
     try {
       console.log(`[Deduct Credits] userId: ${userId}, type: ${type}`);
-      await withTimeout2(
+      await withTimeout3(
         (async () => {
           const settingsSnap = await db.collection("settings").doc("app").get();
           const settingsData = settingsSnap.exists ? settingsSnap.data() : {};

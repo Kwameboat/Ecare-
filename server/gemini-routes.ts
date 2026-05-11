@@ -177,8 +177,11 @@ export function attachGeminiRoutes(app: Express) {
   });
 
   app.post("/api/gemini/chat", async (req, res) => {
+    const startedAt = Date.now();
+    console.log("[Gemini chat] start");
     const apiKey = await getGeminiApiKey();
     if (!apiKey) {
+      console.warn("[Gemini chat] missing API key (env/firestore fallback)");
       return res.status(503).json({
         error:
           "No Gemini API key: set GEMINI_API_KEY (Vercel) or save a key below in Admin → API Settings (Firestore).",
@@ -197,10 +200,14 @@ export function attachGeminiRoutes(app: Express) {
       const contents = normalizeChatContents(history || [], prompt || "", mediaParts || []);
 
       const text = await generateChatViaRest(apiKey, systemInstruction, contents);
+      console.log(`[Gemini chat] success in ${Date.now() - startedAt}ms`);
       res.json({ text });
     } catch (e: unknown) {
       console.error("[Gemini chat]", e);
       const msg = e instanceof Error ? e.message : "Gemini request failed";
+      if (msg.includes("timeout")) {
+        return res.status(504).json({ error: msg });
+      }
       res.status(500).json({ error: msg });
     }
   });
