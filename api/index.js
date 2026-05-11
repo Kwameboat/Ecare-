@@ -171,36 +171,42 @@ function withTimeout2(promise, ms, label) {
 }
 async function generateChatViaRest(apiKey, systemInstruction, contents) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), REST_CHAT_TIMEOUT_MS);
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
       CHAT_MODEL
     )}:generateContent?key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: ctrl.signal,
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        contents
-      })
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        ctrl.abort();
+        reject(new Error(`gemini_chat timeout (${REST_CHAT_TIMEOUT_MS}ms)`));
+      }, REST_CHAT_TIMEOUT_MS);
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error?.message || `Gemini REST failed (${res.status})`);
-    }
-    const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("").trim() || "";
-    if (!text) {
-      throw new Error("Gemini returned an empty response.");
-    }
-    return text;
+    const requestPromise = (async () => {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          contents
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error?.message || `Gemini REST failed (${res.status})`);
+      }
+      const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("").trim() || "";
+      if (!text) {
+        throw new Error("Gemini returned an empty response.");
+      }
+      return text;
+    })();
+    return await Promise.race([requestPromise, timeoutPromise]);
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") {
       throw new Error(`gemini_chat timeout (${REST_CHAT_TIMEOUT_MS}ms)`);
     }
     throw e;
-  } finally {
-    clearTimeout(timer);
   }
 }
 function normalizeChatContents(history, prompt, mediaParts) {
