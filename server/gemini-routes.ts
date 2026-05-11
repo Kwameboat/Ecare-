@@ -6,12 +6,12 @@ import { getGeminiApiKey } from "./gemini-key.js";
 /** Defaults use widely available AI Studio models; override via Vercel env if needed. */
 const CHAT_MODEL = process.env.GEMINI_CHAT_MODEL?.trim() || "gemini-2.0-flash";
 const SPEECH_MODEL = process.env.GEMINI_SPEECH_MODEL?.trim() || "gemini-2.5-flash-tts";
-const CHAT_TIMEOUT_MS = Math.min(
-  Number(process.env.GEMINI_CHAT_TIMEOUT_MS) || 30_000,
-  120_000
-);
 const SPEECH_TIMEOUT_MS = Math.min(
   Number(process.env.GEMINI_SPEECH_TIMEOUT_MS) || 25_000,
+  120_000
+);
+const REST_CHAT_TIMEOUT_MS = Math.min(
+  Number(process.env.GEMINI_CHAT_REST_TIMEOUT_MS) || 25_000,
   120_000
 );
 
@@ -28,6 +28,62 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
         reject(e);
       });
   });
+}
+
+type GeminiGenerateContentResponse = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{ text?: string }>;
+    };
+  }>;
+  error?: { message?: string };
+};
+
+async function generateChatViaRest(
+  apiKey: string,
+  systemInstruction: string,
+  contents: object[]
+): Promise<string> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REST_CHAT_TIMEOUT_MS);
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      CHAT_MODEL
+    )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        contents,
+      }),
+    });
+
+    const data = (await res.json().catch(() => ({}))) as GeminiGenerateContentResponse;
+    if (!res.ok) {
+      throw new Error(data.error?.message || `Gemini REST failed (${res.status})`);
+    }
+
+    const text =
+      data.candidates?.[0]?.content?.parts
+        ?.map((p) => p.text || "")
+        .join("")
+        .trim() || "";
+
+    if (!text) {
+      throw new Error("Gemini returned an empty response.");
+    }
+    return text;
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error(`gemini_chat timeout (${REST_CHAT_TIMEOUT_MS}ms)`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function normalizeChatContents(
@@ -137,23 +193,10 @@ export function attachGeminiRoutes(app: Express) {
         doctors?: { name: string; specialty: string }[];
       };
 
-      const ai = new GoogleGenAI({ apiKey });
       const systemInstruction = buildSystemInstruction(doctors || []);
       const contents = normalizeChatContents(history || [], prompt || "", mediaParts || []);
 
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: CHAT_MODEL,
-          contents,
-          config: {
-            systemInstruction,
-          },
-        }),
-        CHAT_TIMEOUT_MS,
-        "gemini_chat"
-      );
-
-      const text = response.text ?? "";
+      const text = await generateChatViaRest(apiKey, systemInstruction, contents);
       res.json({ text });
     } catch (e: unknown) {
       console.error("[Gemini chat]", e);

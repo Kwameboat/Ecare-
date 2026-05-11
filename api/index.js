@@ -130,12 +130,12 @@ async function getGeminiApiKey() {
 // server/gemini-routes.ts
 var CHAT_MODEL = process.env.GEMINI_CHAT_MODEL?.trim() || "gemini-2.0-flash";
 var SPEECH_MODEL = process.env.GEMINI_SPEECH_MODEL?.trim() || "gemini-2.5-flash-tts";
-var CHAT_TIMEOUT_MS = Math.min(
-  Number(process.env.GEMINI_CHAT_TIMEOUT_MS) || 3e4,
-  12e4
-);
 var SPEECH_TIMEOUT_MS = Math.min(
   Number(process.env.GEMINI_SPEECH_TIMEOUT_MS) || 25e3,
+  12e4
+);
+var REST_CHAT_TIMEOUT_MS = Math.min(
+  Number(process.env.GEMINI_CHAT_REST_TIMEOUT_MS) || 25e3,
   12e4
 );
 function withTimeout(promise, ms, label) {
@@ -149,6 +149,40 @@ function withTimeout(promise, ms, label) {
       reject(e);
     });
   });
+}
+async function generateChatViaRest(apiKey, systemInstruction, contents) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REST_CHAT_TIMEOUT_MS);
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      CHAT_MODEL
+    )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        contents
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error?.message || `Gemini REST failed (${res.status})`);
+    }
+    const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("").trim() || "";
+    if (!text) {
+      throw new Error("Gemini returned an empty response.");
+    }
+    return text;
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error(`gemini_chat timeout (${REST_CHAT_TIMEOUT_MS}ms)`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 function normalizeChatContents(history, prompt, mediaParts) {
   const out = [];
@@ -242,21 +276,9 @@ function attachGeminiRoutes(app) {
     }
     try {
       const { prompt, history, mediaParts, doctors } = req.body;
-      const ai = new GoogleGenAI({ apiKey });
       const systemInstruction = buildSystemInstruction(doctors || []);
       const contents = normalizeChatContents(history || [], prompt || "", mediaParts || []);
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: CHAT_MODEL,
-          contents,
-          config: {
-            systemInstruction
-          }
-        }),
-        CHAT_TIMEOUT_MS,
-        "gemini_chat"
-      );
-      const text = response.text ?? "";
+      const text = await generateChatViaRest(apiKey, systemInstruction, contents);
       res.json({ text });
     } catch (e) {
       console.error("[Gemini chat]", e);
